@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "conductor"
+version = "1.0.0"
+description = "Remote terminal command center via Telegram"
+requires-python = ">=3.11"
+dependencies = [
+    "aiogram>=3.4.0",
+    "libtmux>=0.37.0",
+    "aiosqlite>=0.20.0",
+    "anthropic>=0.40.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0",
+    "aiofiles>=24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "aioresponses>=0.7",
+    "pytest-cov",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["conductor"]
+omit = [
+    "*/handlers/commands.py",
+    "*/handlers/callbacks.py",
+    "*/handlers/natural.py",
+    "*/handlers/fallback.py",
+    "*/bot/bot.py",
+    "*/bot/notifier.py",
+    "*/sessions/manager.py",
+    "*/sessions/monitor.py",
+    "*/sessions/recovery.py",
+    "*/security/auth.py",
+    "*/ai/brain.py",
+    "*/__main__.py",
+    "*/main.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80

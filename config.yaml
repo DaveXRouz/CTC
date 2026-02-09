@@ -1,0 +1,79 @@
+# Conductor — User Configuration
+# Safe to edit anytime. Restart daemon to apply changes.
+
+# ── Session defaults ──
+sessions:
+  max_concurrent: 5
+  default_type: "claude-code"
+  default_dir: "~/projects"
+  aliases: {}
+
+# ── Token tracking ──
+tokens:
+  plan_tier: "pro"
+  warning_pct: 80
+  danger_pct: 90
+  critical_pct: 95
+  window_hours: 5
+
+# ── Monitoring ──
+monitor:
+  poll_interval_ms: 500
+  active_poll_interval_ms: 300
+  idle_poll_interval_ms: 2000
+  output_buffer_max_lines: 5000
+  completion_idle_threshold_s: 30
+
+# ── Notifications ──
+notifications:
+  batch_window_s: 5
+  confirmation_timeout_s: 30
+  quiet_hours:
+    enabled: false
+    start: "23:00"
+    end: "07:00"
+    timezone: "Asia/Makassar"
+  sounds:
+    input_required: true
+    token_warning: false
+    error: true
+    completed: false
+
+# ── Auto-Responder ──
+auto_responder:
+  enabled: true
+  default_rules:
+    - pattern: "(Y/n)"
+      response: "y"
+      match_type: "contains"
+    - pattern: "(y/N)"
+      response: "n"
+      match_type: "contains"
+    - pattern: "Press Enter to continue"
+      response: ""
+      match_type: "contains"
+    - pattern: "retry\\? \\(y/n\\)"
+      response: "y"
+      match_type: "regex"
+
+# ── AI Brain ──
+ai:
+  model: "claude-haiku-4-5-20251001"
+  summary_max_tokens: 200
+  suggestion_max_tokens: 300
+  nlp_max_tokens: 150
+  timeout_seconds: 10
+  fallback_lines: 20
+
+# ── Security ──
+security:
+  redact_patterns: true
+  confirm_destructive: true
+  log_all_commands: true
+
+# ── Logging ──
+logging:
+  file: "~/.conductor/conductor.log"
+  max_size_mb: 50
+  backup_count: 3
+  console_output: false

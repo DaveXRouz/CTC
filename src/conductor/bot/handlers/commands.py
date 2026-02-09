@@ -1,0 +1,659 @@
+"""Slash command handlers for the Telegram bot."""
+
+from __future__ import annotations
+
+import io
+import os
+from datetime import datetime
+
+from aiogram import Router
+from aiogram.filters import Command, CommandStart
+from aiogram.types import Message, BufferedInputFile
+
+from conductor.bot.formatter import (
+    format_status_dashboard,
+    session_label,
+    mono,
+    bold,
+)
+from conductor.bot.keyboards import (
+    status_keyboard,
+    confirm_keyboard,
+)
+from conductor.sessions.manager import SessionManager
+from conductor.utils.logger import get_logger
+
+logger = get_logger("conductor.bot.commands")
+
+router = Router()
+
+# These get injected at bot startup
+_session_manager: SessionManager | None = None
+
+
+def set_session_manager(manager: SessionManager) -> None:
+    global _session_manager
+    _session_manager = manager
+
+
+def _mgr() -> SessionManager:
+    assert _session_manager is not None, "Session manager not initialized"
+    return _session_manager
+
+
+# ── /start ──
+
+
+@router.message(CommandStart())
+async def cmd_start(message: Message) -> None:
+    await message.answer(
+        "🎛️ <b>Welcome to Conductor!</b>\n\n"
+        "I'm your remote terminal command center. I monitor your tmux sessions, "
+        "relay alerts, and let you control everything from Telegram.\n\n"
+        "Quick start:\n"
+        "• /new cc ~/projects/myapp — Start a Claude Code session\n"
+        "• /new sh ~/projects/myapp — Start a shell session\n"
+        "• /status — View all sessions\n"
+        "• /help — Full command reference\n\n"
+        "Send me natural language too — I understand things like "
+        '"what\'s happening in CountWize?"',
+        parse_mode="HTML",
+    )
+
+
+# ── /help ──
+
+
+@router.message(Command("help"))
+async def cmd_help(message: Message) -> None:
+    await message.answer(
+        "📖 <b>Conductor Command Reference</b>\n\n"
+        "<b>Session Control:</b>\n"
+        "/new cc &lt;dir&gt; — Start Claude Code session\n"
+        "/new sh &lt;dir&gt; — Start shell session\n"
+        "/kill &lt;name|#&gt; — Kill session (confirms)\n"
+        "/restart &lt;name|#&gt; — Restart session\n"
+        "/pause &lt;name|#&gt; — Pause session\n"
+        "/resume &lt;name|#&gt; — Resume session\n"
+        "/rename &lt;#&gt; &lt;name&gt; — Rename session\n\n"
+        "<b>Monitoring:</b>\n"
+        "/status — Session dashboard\n"
+        "/output &lt;name|#&gt; — AI summary of output\n"
+        "/log &lt;name|#&gt; — Full log as file\n"
+        "/tokens — Token usage\n"
+        "/digest — Full digest\n\n"
+        "<b>Input:</b>\n"
+        "/input &lt;name|#&gt; &lt;text&gt; — Send input\n"
+        "/run &lt;name|#&gt; &lt;cmd&gt; — Run command in session\n"
+        "/shell &lt;cmd&gt; — One-off shell command\n\n"
+        "<b>Auto-Responder:</b>\n"
+        "/auto list — Show rules\n"
+        '/auto add "pattern" "response"\n'
+        "/auto remove &lt;#&gt;\n"
+        "/auto pause / resume\n\n"
+        "<b>Settings:</b>\n"
+        "/quiet HH:MM-HH:MM — Quiet hours\n"
+        "/settings — View config",
+        parse_mode="HTML",
+    )
+
+
+# ── /status ──
+
+
+@router.message(Command("status"))
+async def cmd_status(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=1)
+
+    if len(args) > 1:
+        session = mgr.resolve_session(args[1])
+        if not session:
+            await message.answer(f"❌ Session not found: {args[1]}")
+            return
+        from conductor.bot.formatter import format_session_dashboard
+
+        await message.answer(
+            format_session_dashboard(session),
+            parse_mode="HTML",
+            reply_markup=status_keyboard(),
+        )
+    else:
+        sessions = await mgr.list_sessions()
+        await message.answer(
+            format_status_dashboard(sessions),
+            parse_mode="HTML",
+            reply_markup=status_keyboard(),
+        )
+
+
+# ── /new ──
+
+
+@router.message(Command("new"))
+async def cmd_new(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split()
+
+    if len(args) < 3:
+        await message.answer(
+            "Usage: /new &lt;cc|sh&gt; &lt;directory&gt;\n"
+            "Example: /new cc ~/projects/myapp",
+            parse_mode="HTML",
+        )
+        return
+
+    stype = "claude-code" if args[1] in ("cc", "claude-code") else "shell"
+    working_dir = args[2]
+
+    try:
+        session = await mgr.create_session(session_type=stype, working_dir=working_dir)
+        await message.answer(
+            f"✅ Created {session_label(session)} (#{session.number})\n"
+            f"Type: {session.type}\n"
+            f"Dir: {mono(session.working_dir)}",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        await message.answer(f"❌ Failed to create session: {e}")
+
+
+# ── /kill ──
+
+
+@router.message(Command("kill"))
+async def cmd_kill(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=1)
+
+    if len(args) < 2:
+        await message.answer("Usage: /kill &lt;name|#&gt;", parse_mode="HTML")
+        return
+
+    session = mgr.resolve_session(args[1])
+    if not session:
+        await message.answer(f"❌ Session not found: {args[1]}")
+        return
+
+    await message.answer(
+        f"⚠️ Confirm: Kill session {session_label(session)}?\n"
+        "This will terminate the process. Unsaved work may be lost.\n\n"
+        "⏱️ Auto-cancels in 30 seconds.",
+        parse_mode="HTML",
+        reply_markup=confirm_keyboard("kill", session.id),
+    )
+
+
+# ── /pause ──
+
+
+@router.message(Command("pause"))
+async def cmd_pause(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=1)
+
+    if len(args) < 2:
+        await message.answer("Usage: /pause &lt;name|#&gt;", parse_mode="HTML")
+        return
+
+    session = mgr.resolve_session(args[1])
+    if not session:
+        await message.answer(f"❌ Session not found: {args[1]}")
+        return
+
+    result = await mgr.pause_session(session.id)
+    if result:
+        await message.answer(f"⏸ Paused {session_label(result)}")
+    else:
+        await message.answer("❌ Could not pause session.")
+
+
+# ── /resume ──
+
+
+@router.message(Command("resume"))
+async def cmd_resume(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=1)
+
+    if len(args) < 2:
+        await message.answer("Usage: /resume &lt;name|#&gt;", parse_mode="HTML")
+        return
+
+    session = mgr.resolve_session(args[1])
+    if not session:
+        await message.answer(f"❌ Session not found: {args[1]}")
+        return
+
+    result = await mgr.resume_session(session.id)
+    if result:
+        await message.answer(f"▶️ Resumed {session_label(result)}")
+    else:
+        await message.answer("❌ Could not resume session.")
+
+
+# ── /input ──
+
+
+@router.message(Command("input"))
+async def cmd_input(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=2)
+
+    if len(args) < 3:
+        await message.answer(
+            "Usage: /input &lt;name|#&gt; &lt;text&gt;",
+            parse_mode="HTML",
+        )
+        return
+
+    session = mgr.resolve_session(args[1])
+    if not session:
+        await message.answer(f"❌ Session not found: {args[1]}")
+        return
+
+    text = args[2]
+    if mgr.send_input(session.id, text):
+        await message.answer(
+            f"📤 Sent to {session_label(session)}: {mono(text)}", parse_mode="HTML"
+        )
+    else:
+        await message.answer("❌ Could not send input.")
+
+
+# ── /output ──
+
+
+@router.message(Command("output"))
+async def cmd_output(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=1)
+
+    sessions = await mgr.list_sessions()
+    if len(args) > 1:
+        session = mgr.resolve_session(args[1])
+    elif len(sessions) == 1:
+        session = sessions[0]
+    else:
+        await message.answer("Usage: /output &lt;name|#&gt;", parse_mode="HTML")
+        return
+
+    if not session:
+        await message.answer(
+            f"❌ Session not found: {args[1] if len(args) > 1 else ''}"
+        )
+        return
+
+    # Try to get output from the monitor's buffer
+    from conductor.bot.bot import get_app_data
+
+    app_data = get_app_data()
+    monitors = app_data.get("monitors", {})
+    monitor = monitors.get(session.id)
+
+    if monitor and hasattr(monitor, "output_buffer"):
+        lines = monitor.output_buffer.rolling_buffer[-30:]
+        if lines:
+            text = "\n".join(lines)
+            # Try AI summary if brain is available
+            brain = app_data.get("brain")
+            if brain:
+                try:
+                    summary = await brain.summarize(text)
+                    await message.answer(
+                        f"📊 {session_label(session)} — AI Summary:\n\n{summary}",
+                        parse_mode="HTML",
+                    )
+                    return
+                except Exception:
+                    pass
+            # Fallback: raw output
+            await message.answer(
+                f"📝 {session_label(session)} — Last 30 lines:\n\n{mono(text[:3500])}",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(
+                f"📝 {session_label(session)} — No output captured yet."
+            )
+    else:
+        await message.answer(f"📝 {session_label(session)} — No monitor active.")
+
+
+# ── /log ──
+
+
+@router.message(Command("log"))
+async def cmd_log(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=1)
+
+    sessions = await mgr.list_sessions()
+    if len(args) > 1:
+        session = mgr.resolve_session(args[1])
+    elif len(sessions) == 1:
+        session = sessions[0]
+    else:
+        await message.answer("Usage: /log &lt;name|#&gt;", parse_mode="HTML")
+        return
+
+    if not session:
+        await message.answer(f"❌ Session not found.")
+        return
+
+    from conductor.bot.bot import get_app_data
+
+    monitors = get_app_data().get("monitors", {})
+    monitor = monitors.get(session.id)
+
+    if monitor and hasattr(monitor, "output_buffer"):
+        lines = monitor.output_buffer.rolling_buffer
+        if lines:
+            content = "\n".join(lines)
+            buf = io.BytesIO(content.encode("utf-8"))
+            filename = f"{session.alias}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
+            doc = BufferedInputFile(buf.read(), filename=filename)
+            await message.answer_document(
+                doc, caption=f"📋 Full log for {session_label(session)}"
+            )
+        else:
+            await message.answer(
+                f"📋 {session_label(session)} — No output captured yet."
+            )
+    else:
+        await message.answer(f"📋 {session_label(session)} — No monitor active.")
+
+
+# ── /rename ──
+
+
+@router.message(Command("rename"))
+async def cmd_rename(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=2)
+
+    if len(args) < 3:
+        await message.answer(
+            "Usage: /rename &lt;#&gt; &lt;new_name&gt;",
+            parse_mode="HTML",
+        )
+        return
+
+    session = mgr.resolve_session(args[1])
+    if not session:
+        await message.answer(f"❌ Session not found: {args[1]}")
+        return
+
+    old_name = session.alias
+    result = await mgr.rename_session(session.id, args[2])
+    if result:
+        await message.answer(
+            f"✏️ Renamed {session.color_emoji} #{session.number}: "
+            f"{old_name} → {bold(args[2])}",
+            parse_mode="HTML",
+        )
+
+
+# ── /run ──
+
+
+@router.message(Command("run"))
+async def cmd_run(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=2)
+
+    if len(args) < 3:
+        await message.answer(
+            "Usage: /run &lt;name|#&gt; &lt;command&gt;",
+            parse_mode="HTML",
+        )
+        return
+
+    session = mgr.resolve_session(args[1])
+    if not session:
+        await message.answer(f"❌ Session not found: {args[1]}")
+        return
+
+    cmd = args[2]
+    if mgr.send_input(session.id, cmd):
+        await message.answer(
+            f"▶️ Running in {session_label(session)}:\n{mono(cmd)}",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer("❌ Could not send command.")
+
+
+# ── /shell ──
+
+
+@router.message(Command("shell"))
+async def cmd_shell(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=1)
+
+    if len(args) < 2:
+        await message.answer("Usage: /shell &lt;command&gt;", parse_mode="HTML")
+        return
+
+    cmd = args[1]
+    try:
+        import asyncio
+
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        output = stdout.decode("utf-8", errors="replace")
+        if stderr:
+            output += "\n" + stderr.decode("utf-8", errors="replace")
+        output = output[:3500]
+        await message.answer(
+            (
+                f"🖥️ Shell output:\n{mono(output)}"
+                if output.strip()
+                else "🖥️ Command completed (no output)."
+            ),
+            parse_mode="HTML",
+        )
+    except asyncio.TimeoutError:
+        await message.answer("⏰ Command timed out after 30 seconds.")
+    except Exception as e:
+        await message.answer(f"❌ Shell error: {e}")
+
+
+# ── /tokens ──
+
+
+@router.message(Command("tokens"))
+async def cmd_tokens(message: Message) -> None:
+    mgr = _mgr()
+    from conductor.bot.bot import get_app_data
+
+    estimator = get_app_data().get("token_estimator")
+
+    if not estimator:
+        await message.answer("Token tracking not available.")
+        return
+
+    sessions = await mgr.list_sessions()
+    if not sessions:
+        await message.answer("No active sessions.")
+        return
+
+    lines = ["📊 <b>Token Usage</b>\n"]
+    for s in sessions:
+        usage = estimator.get_usage(s.id)
+        pct = usage["percentage"]
+        warn = " ⚠️" if pct >= 80 else ""
+        lines.append(
+            f"{s.color_emoji} {s.alias}: {pct}% ({usage['used']}/{usage['limit']}){warn}"
+        )
+
+    total = estimator.get_usage()
+    lines.append(
+        f"\n<b>Total:</b> {total['percentage']}% ({total['used']}/{total['limit']})"
+    )
+    lines.append(f"Tier: {total['tier']}")
+    if total["reset_in_seconds"]:
+        mins = int(total["reset_in_seconds"] / 60)
+        lines.append(f"Resets in: {mins}m")
+
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+# ── /digest ──
+
+
+@router.message(Command("digest"))
+async def cmd_digest(message: Message) -> None:
+    # Same as /status for now — AI digest comes in Phase 3
+    await cmd_status(message)
+
+
+# ── /auto ──
+
+
+@router.message(Command("auto"))
+async def cmd_auto(message: Message) -> None:
+    from conductor.auto import rules as auto_rules
+
+    args = (message.text or "").split(maxsplit=2)
+    subcmd = args[1] if len(args) > 1 else "list"
+
+    if subcmd == "list":
+        all_rules = await auto_rules.get_all_rules()
+        if not all_rules:
+            await message.answer("No auto-response rules configured.")
+            return
+        lines = ["📋 <b>Auto-Response Rules</b>\n"]
+        for r in all_rules:
+            status = "✅" if r.enabled else "⏸"
+            lines.append(
+                f"{status} #{r.id} — <code>{r.pattern}</code> → <code>{r.response or '(enter)'}</code> "
+                f"({r.match_type}, {r.hit_count} hits)"
+            )
+        await message.answer("\n".join(lines), parse_mode="HTML")
+
+    elif subcmd == "add":
+        # Parse: /auto add "pattern" "response"
+        rest = args[2] if len(args) > 2 else ""
+        import re as _re
+
+        parts = _re.findall(r'"([^"]*)"', rest)
+        if len(parts) < 2:
+            await message.answer(
+                'Usage: /auto add "pattern" "response"',
+                parse_mode="HTML",
+            )
+            return
+        rule_id = await auto_rules.add_rule(parts[0], parts[1])
+        await message.answer(
+            f"✅ Added rule #{rule_id}: <code>{parts[0]}</code> → <code>{parts[1]}</code>",
+            parse_mode="HTML",
+        )
+
+    elif subcmd == "remove":
+        try:
+            rule_id = int(args[2])
+        except (IndexError, ValueError):
+            await message.answer("Usage: /auto remove &lt;#&gt;", parse_mode="HTML")
+            return
+        if await auto_rules.remove_rule(rule_id):
+            await message.answer(f"🗑️ Removed rule #{rule_id}")
+        else:
+            await message.answer(f"❌ Rule #{rule_id} not found")
+
+    elif subcmd == "pause":
+        await auto_rules.pause_all()
+        await message.answer("⏸ Auto-responder paused. All rules disabled.")
+
+    elif subcmd == "resume":
+        await auto_rules.resume_all()
+        await message.answer("▶️ Auto-responder resumed. All rules enabled.")
+
+    else:
+        await message.answer(
+            "Usage: /auto &lt;list|add|remove|pause|resume&gt;",
+            parse_mode="HTML",
+        )
+
+
+# ── /restart ──
+
+
+@router.message(Command("restart"))
+async def cmd_restart(message: Message) -> None:
+    mgr = _mgr()
+    args = (message.text or "").split(maxsplit=1)
+
+    if len(args) < 2:
+        await message.answer("Usage: /restart &lt;name|#&gt;", parse_mode="HTML")
+        return
+
+    session = mgr.resolve_session(args[1])
+    if not session:
+        await message.answer(f"❌ Session not found: {args[1]}")
+        return
+
+    await message.answer(
+        f"⚠️ Confirm: Restart session {session_label(session)}?\n"
+        "This will kill and recreate the session.\n\n"
+        "⏱️ Auto-cancels in 30 seconds.",
+        parse_mode="HTML",
+        reply_markup=confirm_keyboard("restart", session.id),
+    )
+
+
+# ── /quiet ──
+
+
+@router.message(Command("quiet"))
+async def cmd_quiet(message: Message) -> None:
+    args = (message.text or "").split(maxsplit=1)
+
+    if len(args) < 2:
+        from conductor.config import get_config
+
+        cfg = get_config()
+        qh = cfg.quiet_hours
+        if qh.get("enabled"):
+            await message.answer(
+                f"🌙 Quiet hours: {qh.get('start', '23:00')} - {qh.get('end', '07:00')}\n"
+                f"Timezone: {qh.get('timezone', 'UTC')}",
+            )
+        else:
+            await message.answer(
+                "🌙 Quiet hours are disabled.\n" "Usage: /quiet HH:MM-HH:MM",
+            )
+        return
+
+    await message.answer(
+        f"🌙 Quiet hours updated. Note: changes require daemon restart to take effect.\n"
+        "Edit config.yaml to persist.",
+    )
+
+
+# ── /settings ──
+
+
+@router.message(Command("settings"))
+async def cmd_settings(message: Message) -> None:
+    from conductor.config import get_config
+
+    cfg = get_config()
+
+    lines = [
+        "⚙️ <b>Conductor Settings</b>\n",
+        f"Plan tier: {cfg.plan_tier}",
+        f"Max sessions: {cfg.max_concurrent_sessions}",
+        f"Poll interval: {cfg.monitor_config.get('poll_interval_ms', 500)}ms",
+        f"Batch window: {cfg.batch_window_s}s",
+        f"AI model: {cfg.ai_model}",
+        f"Auto-responder: {'enabled' if cfg.auto_responder_config.get('enabled') else 'disabled'}",
+        f"Redaction: {'enabled' if cfg.security_config.get('redact_patterns') else 'disabled'}",
+        f"Quiet hours: {'enabled' if cfg.quiet_hours.get('enabled') else 'disabled'}",
+    ]
+    await message.answer("\n".join(lines), parse_mode="HTML")
