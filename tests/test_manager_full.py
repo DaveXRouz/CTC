@@ -79,7 +79,7 @@ def _make_mock_pane(pane_pid: str = "99999", pane_id: str = "%0"):
 def _make_mock_tmux_session(pane: MagicMock | None = None):
     pane = pane or _make_mock_pane()
     tmux_session = MagicMock()
-    tmux_session.attached_window.attached_pane = pane
+    tmux_session.active_window.active_pane = pane
     return tmux_session, pane
 
 

@@ -9,7 +9,7 @@ description = "Remote terminal command center via Telegram"
 requires-python = ">=3.11"
 dependencies = [
     "aiogram>=3.4.0",
-    "libtmux>=0.37.0",
+    "libtmux>=0.38.0",
     "aiosqlite>=0.20.0",
     "anthropic>=0.40.0",
     "pyyaml>=6.0",

@@ -117,7 +117,7 @@ class SessionManager:
             start_directory=working_dir,
             attach=False,
         )
-        pane = tmux_session.attached_window.attached_pane
+        pane = tmux_session.active_window.active_pane
 
         # Start Claude Code if needed
         if session_type == "claude-code":

@@ -59,7 +59,7 @@ async def recover_sessions(
         if number in existing_numbers:
             continue
 
-        pane = tmux_session.attached_window.attached_pane
+        pane = tmux_session.active_window.active_pane
         pid_str = pane.get("pane_pid")
         pid = int(pid_str) if pid_str else None
 
