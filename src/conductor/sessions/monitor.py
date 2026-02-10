@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime
 
 import libtmux
@@ -34,7 +35,8 @@ class OutputMonitor:
 
         self.idle_seconds: float = 0
         self.active_output: bool = False
-        self._running: bool = False
+        self._stop_event = asyncio.Event()
+        self._last_poll_time: float = 0.0
 
         cfg = get_config().monitor_config
         self._poll_default = cfg.get("poll_interval_ms", 500) / 1000
@@ -53,13 +55,18 @@ class OutputMonitor:
         return self._poll_default
 
     async def start(self) -> None:
-        """Start the monitoring loop."""
-        self._running = True
+        """Start the async monitoring loop.
+
+        Polls the tmux pane at adaptive intervals and fires ``on_event``
+        when patterns are detected in new output.
+        """
+        self._stop_event.clear()
         logger.info(
             f"Monitor started for session #{self.session.number} '{self.session.alias}'"
         )
 
-        while self._running:
+        while not self._stop_event.is_set():
+            self._last_poll_time = time.monotonic()
             try:
                 new_lines = self.output_buffer.get_new_lines(self.pane)
 
@@ -68,7 +75,10 @@ class OutputMonitor:
                     self.active_output = True
                     await self._process_output(new_lines)
                 else:
-                    self.idle_seconds += self.poll_interval
+                    # C14: Use monotonic time delta for accurate idle tracking
+                    self.idle_seconds += (
+                        time.monotonic() - self._last_poll_time + self.poll_interval
+                    )
 
                     if (
                         self.active_output
@@ -80,15 +90,25 @@ class OutputMonitor:
             except Exception as e:
                 logger.error(f"Monitor error for {self.session.alias}: {e}")
 
-            await asyncio.sleep(self.poll_interval)
+            # C1: Use event wait so stop() can interrupt sleep immediately
+            try:
+                await asyncio.wait_for(
+                    self._stop_event.wait(), timeout=self.poll_interval
+                )
+            except asyncio.TimeoutError:
+                pass
 
     async def stop(self) -> None:
-        """Stop the monitoring loop."""
-        self._running = False
+        """Stop the monitoring loop (interrupts sleep immediately)."""
+        self._stop_event.set()
         logger.info(f"Monitor stopped for session #{self.session.number}")
 
     async def _process_output(self, lines: list[str]) -> None:
-        """Analyze new output lines for patterns."""
+        """Analyze new output lines for patterns and fire event callback.
+
+        Args:
+            lines: New lines captured from the pane.
+        """
         text = "\n".join(lines)
         result = self.detector.classify(text)
 
@@ -97,7 +117,10 @@ class OutputMonitor:
             await self.on_event(self.session, result, lines)
 
     async def _check_completion(self) -> None:
-        """Check if a task has completed (idle after active output)."""
+        """Check recent output for completion patterns after an idle period.
+
+        Called when the monitor transitions from active to idle state.
+        """
         recent = self.output_buffer.rolling_buffer[-10:]
         if not recent:
             return

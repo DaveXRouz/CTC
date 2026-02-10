@@ -19,15 +19,33 @@ _app_data: dict[str, Any] = {}
 
 
 def get_app_data() -> dict[str, Any]:
+    """Get the shared application data dictionary.
+
+    Returns:
+        Dict of app-wide shared state (monitors, brain, notifier, etc.).
+    """
     return _app_data
 
 
 def set_app_data(key: str, value: Any) -> None:
+    """Set a value in the shared application data dictionary.
+
+    Args:
+        key: State key name.
+        value: Value to store.
+    """
     _app_data[key] = value
 
 
 async def create_bot() -> tuple[Bot, Dispatcher]:
-    """Create and configure the Telegram bot and dispatcher."""
+    """Create and configure the Telegram bot and dispatcher.
+
+    Registers auth middleware and includes routers in order:
+    commands -> callbacks -> natural (natural must be last).
+
+    Returns:
+        Tuple of ``(Bot, Dispatcher)`` ready for polling.
+    """
     cfg = get_config()
 
     bot = Bot(

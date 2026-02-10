@@ -18,7 +18,18 @@ def setup_logging(
     backup_count: int = 3,
     console: bool = True,
 ) -> logging.Logger:
-    """Configure the conductor logger with rich console + rotating file handler."""
+    """Configure the conductor logger with Rich console + rotating file handler.
+
+    Args:
+        level: Log level string (``'DEBUG'``, ``'INFO'``, ``'WARNING'``, ``'ERROR'``).
+        log_file: Path to the rotating log file. None to disable file logging.
+        max_bytes: Max file size before rotation (default 50 MB).
+        backup_count: Number of rotated files to keep (default 3).
+        console: Whether to enable Rich console output (default True).
+
+    Returns:
+        The configured ``'conductor'`` root logger.
+    """
     global _configured
     if _configured:
         return logging.getLogger("conductor")
@@ -56,5 +67,12 @@ def setup_logging(
 
 
 def get_logger(name: str = "conductor") -> logging.Logger:
-    """Get a child logger."""
+    """Get a child logger under the ``'conductor'`` namespace.
+
+    Args:
+        name: Logger name (e.g. ``'conductor.bot.commands'``).
+
+    Returns:
+        A ``logging.Logger`` instance.
+    """
     return logging.getLogger(name)

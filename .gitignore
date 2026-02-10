@@ -23,5 +23,8 @@ htmlcov/
 .vscode/
 .idea/
 
+# State tracking
+.atlas-state.json
+
 # OS
 .DS_Store

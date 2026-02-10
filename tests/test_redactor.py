@@ -46,3 +46,31 @@ class TestRedaction:
         text = "GITHUB_TOKEN=ghp_ABC123DEF456GHI789JKL012MNO345PQR678"
         result = redact_sensitive(text)
         assert "ghp_" not in result
+
+    def test_redacts_aws_key(self):
+        text = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"
+        result = redact_sensitive(text)
+        assert "AKIA" not in result
+        assert "[REDACTED:AWS_KEY]" in result
+
+    def test_redacts_slack_bot_token(self):
+        text = "Using xoxb-123456789-abcdefghijklmn for auth"
+        result = redact_sensitive(text)
+        assert "xoxb-" not in result
+        assert "[REDACTED:SLACK_TOKEN]" in result
+
+    def test_redacts_slack_user_token(self):
+        text = "Header: xoxp-999888777-abcdefghijk"
+        result = redact_sensitive(text)
+        assert "xoxp-" not in result
+
+    def test_redacts_private_key_header(self):
+        text = "-----BEGIN RSA PRIVATE KEY-----\nMIIE..."
+        result = redact_sensitive(text)
+        assert "-----BEGIN" not in result
+        assert "[REDACTED:PRIVATE_KEY]" in result
+
+    def test_redacts_ec_private_key(self):
+        text = "-----BEGIN EC PRIVATE KEY-----"
+        result = redact_sensitive(text)
+        assert "BEGIN EC" not in result

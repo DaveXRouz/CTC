@@ -119,6 +119,20 @@ class TestSessionCRUD:
         assert updated.status == "paused"
         assert updated.token_used == 10
 
+    async def test_update_session_rejects_invalid_columns(self, db):
+        s = _make_session()
+        await queries.create_session(s)
+        with pytest.raises(ValueError, match="Invalid column"):
+            await queries.update_session("test-1", status="paused", evil_col="pwned")
+
+    async def test_update_session_rejects_sql_injection_column(self, db):
+        s = _make_session()
+        await queries.create_session(s)
+        with pytest.raises(ValueError, match="Invalid column"):
+            await queries.update_session(
+                "test-1", **{"1=1; DROP TABLE sessions--": "x"}
+            )
+
     async def test_delete_session(self, db):
         s = _make_session()
         await queries.create_session(s)
@@ -209,6 +223,53 @@ class TestAutoRulesCRUD:
         await queries.set_rules_enabled(True)
         enabled2 = await queries.get_all_rules(enabled_only=True)
         assert len(enabled2) == 1
+
+
+class TestPruning:
+    async def test_prune_old_records(self, db):
+        """Old events and commands are pruned; recent ones are kept."""
+        s = _make_session()
+        await queries.create_session(s)
+
+        # Insert an old event (45 days ago)
+        old_ts = (
+            __import__("datetime").datetime.now()
+            - __import__("datetime").timedelta(days=45)
+        ).isoformat()
+        await db.execute(
+            "INSERT INTO events (session_id, event_type, message, timestamp) VALUES (?, ?, ?, ?)",
+            ("test-1", "system", "old msg", old_ts),
+        )
+        # Insert a recent event
+        await queries.log_event(
+            Event(session_id="test-1", event_type="system", message="new msg")
+        )
+        # Insert an old command
+        await db.execute(
+            "INSERT INTO commands (session_id, source, input, timestamp) VALUES (?, ?, ?, ?)",
+            ("test-1", "user", "old cmd", old_ts),
+        )
+        # Insert a recent command
+        await queries.log_command(
+            Command(session_id="test-1", source="user", input="new cmd")
+        )
+        await db.commit()
+
+        deleted = await queries.prune_old_records(max_age_days=30)
+        assert deleted == 2  # 1 old event + 1 old command
+
+        events = await queries.get_events("test-1")
+        assert len(events) == 1
+        assert events[0].message == "new msg"
+
+        cmds = await queries.get_commands("test-1")
+        assert len(cmds) == 1
+        assert cmds[0].input == "new cmd"
+
+    async def test_prune_nothing_to_prune(self, db):
+        """Pruning with no old records returns 0."""
+        deleted = await queries.prune_old_records(max_age_days=30)
+        assert deleted == 0
 
 
 class TestEventsCRUD:

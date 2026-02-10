@@ -26,13 +26,13 @@ class SleepHandler:
         self._last_check: float = time.monotonic()
 
     async def start(self) -> None:
-        """Start the sleep detection loop."""
+        """Start the background sleep detection loop."""
         self._last_check = time.monotonic()
         self._task = asyncio.create_task(self._monitor_loop())
         logger.info("Sleep handler started")
 
     async def stop(self) -> None:
-        """Stop the sleep detection loop."""
+        """Stop the sleep detection loop and cancel the background task."""
         if self._task:
             self._task.cancel()
             try:
@@ -42,7 +42,11 @@ class SleepHandler:
         logger.info("Sleep handler stopped")
 
     async def _monitor_loop(self) -> None:
-        """Poll loop that detects time gaps indicating system sleep."""
+        """Background loop that detects time gaps indicating macOS sleep.
+
+        Compares elapsed real time against the expected check interval.
+        A gap exceeding ``sleep_threshold`` triggers wake handling.
+        """
         while True:
             await asyncio.sleep(self._check_interval)
             now = time.monotonic()
@@ -58,7 +62,11 @@ class SleepHandler:
             self._last_check = now
 
     async def _handle_wake(self, sleep_duration: float) -> None:
-        """Handle wake event — notify and run health checks."""
+        """Handle a detected wake event.
+
+        Args:
+            sleep_duration: Estimated seconds the system was asleep.
+        """
         if self._on_wake:
             try:
                 await self._on_wake(sleep_duration)

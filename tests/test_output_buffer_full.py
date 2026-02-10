@@ -71,18 +71,21 @@ class TestOutputBufferGetNewLines:
 
     def test_hash_set_pruning(self):
         buf = OutputBuffer()
-        # Fill seen_line_hashes past threshold
-        buf.seen_line_hashes = {f"hash-{i}" for i in range(10001)}
+        # Fill seen_line_hashes past threshold using OrderedDict
+        from collections import OrderedDict
+
+        buf.seen_line_hashes = OrderedDict((f"hash-{i}", None) for i in range(10001))
         pane = MagicMock()
         pane.capture_pane.return_value = ["new line"]
         buf.get_new_lines(pane)
-        # Hash set should be pruned
-        assert len(buf.seen_line_hashes) <= 5001
+        # Hash dict should be pruned to 10000 (after removing oldest, then adding new)
+        assert len(buf.seen_line_hashes) <= 10001
 
     def test_reset_clears_all(self):
         buf = OutputBuffer()
         buf.rolling_buffer = ["a", "b"]
-        buf.seen_line_hashes = {"h1", "h2"}
+        buf.seen_line_hashes["h1"] = None
+        buf.seen_line_hashes["h2"] = None
         buf.last_capture_length = 5
         buf.reset()
         assert buf.rolling_buffer == []

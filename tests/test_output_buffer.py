@@ -31,9 +31,25 @@ class TestOutputBuffer:
     def test_reset(self):
         buf = OutputBuffer()
         buf.rolling_buffer = ["line1", "line2"]
-        buf.seen_line_hashes = {"abc"}
+        buf.seen_line_hashes["abc"] = None
         buf.last_capture_length = 5
         buf.reset()
         assert buf.rolling_buffer == []
         assert len(buf.seen_line_hashes) == 0
         assert buf.last_capture_length == 0
+
+    def test_hash_cleanup_preserves_recent(self):
+        """Deterministic cleanup: oldest hashes removed, newest kept."""
+        buf = OutputBuffer()
+        # Insert hashes in known order
+        for i in range(10005):
+            buf.seen_line_hashes[f"hash-{i}"] = None
+        # Simulate cleanup (same logic as get_new_lines)
+        while len(buf.seen_line_hashes) > 10000:
+            buf.seen_line_hashes.popitem(last=False)
+        assert len(buf.seen_line_hashes) == 10000
+        # Oldest should be gone, newest should remain
+        assert "hash-0" not in buf.seen_line_hashes
+        assert "hash-4" not in buf.seen_line_hashes
+        assert "hash-10004" in buf.seen_line_hashes
+        assert "hash-5" in buf.seen_line_hashes

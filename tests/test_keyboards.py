@@ -93,4 +93,4 @@ class TestKeyboards:
     def test_suggestion_keyboard_missing_label(self):
         suggestions = [{"command": "test"}]
         kb = suggestion_keyboard(suggestions, "s1")
-        assert kb.inline_keyboard[0][0].text == "Option 1"
+        assert kb.inline_keyboard[0][0].text == "💡 Option 1"

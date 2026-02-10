@@ -6,7 +6,14 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
 def permission_keyboard(session_id: str) -> InlineKeyboardMarkup:
-    """Buttons for permission prompts: Yes / No / Context / Custom."""
+    """Build inline keyboard for permission prompts.
+
+    Args:
+        session_id: UUID of the session awaiting permission.
+
+    Returns:
+        InlineKeyboardMarkup with Yes, No, Context, and Custom buttons.
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -30,7 +37,14 @@ def permission_keyboard(session_id: str) -> InlineKeyboardMarkup:
 
 
 def completion_keyboard(session_id: str) -> InlineKeyboardMarkup:
-    """Buttons for task completion: Run Tests / Full Log / New Task."""
+    """Build inline keyboard for task completion events.
+
+    Args:
+        session_id: UUID of the completed session.
+
+    Returns:
+        InlineKeyboardMarkup with Run Tests, Full Log, and New Task buttons.
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -43,7 +57,7 @@ def completion_keyboard(session_id: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="🔄 New Task", callback_data=f"comp:new:{session_id}"
+                    text="⏭️ New Task", callback_data=f"comp:new:{session_id}"
                 ),
             ],
         ]
@@ -51,7 +65,14 @@ def completion_keyboard(session_id: str) -> InlineKeyboardMarkup:
 
 
 def rate_limit_keyboard(session_id: str) -> InlineKeyboardMarkup:
-    """Buttons for rate limit: Resume / Auto-Resume / Switch."""
+    """Build inline keyboard for rate limit events.
+
+    Args:
+        session_id: UUID of the rate-limited session.
+
+    Returns:
+        InlineKeyboardMarkup with Resume Now, Auto-Resume 15m, and Switch Task buttons.
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -64,7 +85,7 @@ def rate_limit_keyboard(session_id: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="🔄 Switch Task", callback_data=f"rate:switch:{session_id}"
+                    text="↪️ Switch Task", callback_data=f"rate:switch:{session_id}"
                 ),
             ],
         ]
@@ -72,7 +93,15 @@ def rate_limit_keyboard(session_id: str) -> InlineKeyboardMarkup:
 
 
 def confirm_keyboard(action: str, session_id: str) -> InlineKeyboardMarkup:
-    """Confirmation buttons for destructive actions."""
+    """Build inline keyboard for destructive action confirmation.
+
+    Args:
+        action: Action type (e.g. ``'kill'``, ``'restart'``).
+        session_id: UUID of the target session.
+
+    Returns:
+        InlineKeyboardMarkup with "Yes, Do It" and Cancel buttons.
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -89,7 +118,14 @@ def confirm_keyboard(action: str, session_id: str) -> InlineKeyboardMarkup:
 
 
 def undo_keyboard(action_id: str) -> InlineKeyboardMarkup:
-    """Undo button for auto-responses (30s TTL)."""
+    """Build inline keyboard with an undo button for auto-responses.
+
+    Args:
+        action_id: Identifier for the auto-response action to undo.
+
+    Returns:
+        InlineKeyboardMarkup with a single Undo button.
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🔙 Undo", callback_data=f"undo:{action_id}")],
@@ -98,7 +134,11 @@ def undo_keyboard(action_id: str) -> InlineKeyboardMarkup:
 
 
 def status_keyboard() -> InlineKeyboardMarkup:
-    """Refresh button for status dashboard."""
+    """Build inline keyboard with a refresh button for the status dashboard.
+
+    Returns:
+        InlineKeyboardMarkup with a single Refresh button.
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🔄 Refresh", callback_data="status:refresh")],
@@ -107,7 +147,14 @@ def status_keyboard() -> InlineKeyboardMarkup:
 
 
 def session_picker(sessions: list[tuple[str, str, str]]) -> InlineKeyboardMarkup:
-    """Session picker keyboard. sessions = [(id, emoji, alias)]."""
+    """Build inline keyboard for selecting a session.
+
+    Args:
+        sessions: List of ``(session_id, emoji, alias)`` tuples.
+
+    Returns:
+        InlineKeyboardMarkup with one button per session.
+    """
     buttons = [
         [
             InlineKeyboardButton(
@@ -123,13 +170,21 @@ def session_picker(sessions: list[tuple[str, str, str]]) -> InlineKeyboardMarkup
 def suggestion_keyboard(
     suggestions: list[dict[str, str]], session_id: str
 ) -> InlineKeyboardMarkup:
-    """Build keyboard from AI suggestions."""
+    """Build inline keyboard from AI-generated suggestions.
+
+    Args:
+        suggestions: List of dicts with ``'label'`` keys (max 3 shown).
+        session_id: UUID of the session the suggestions apply to.
+
+    Returns:
+        InlineKeyboardMarkup with one button per suggestion.
+    """
     buttons = []
     for i, s in enumerate(suggestions[:3]):
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=s.get("label", f"Option {i+1}"),
+                    text=s.get("label", f"💡 Option {i+1}"),
                     callback_data=f"suggest:{i}:{session_id}",
                 )
             ]

@@ -25,7 +25,19 @@ async def recover_sessions(
     monitors: dict,
     on_event=None,
 ) -> list[Session]:
-    """Scan for existing conductor-* tmux sessions and re-attach monitors."""
+    """Scan for existing conductor-* tmux sessions and re-attach monitors.
+
+    Finds tmux sessions matching the ``conductor-*`` naming pattern that
+    aren't already tracked, creates DB records for them, and starts monitors.
+
+    Args:
+        session_manager: The active SessionManager instance.
+        monitors: Dict of session_id -> OutputMonitor to populate.
+        on_event: Async callback for monitor events.
+
+    Returns:
+        List of recovered Session dataclasses.
+    """
     try:
         server = session_manager.server
     except Exception:
@@ -92,7 +104,14 @@ async def recover_sessions(
 
             monitor = OutputMonitor(pane, session, on_event=on_event)
             monitors[session.id] = monitor
-            asyncio.create_task(monitor.start())
+            task = asyncio.create_task(monitor.start())
+            # Store ref in monitors dict to prevent GC and silent exception loss
+            if hasattr(monitors, "__setitem__"):
+                from conductor.bot.bot import get_app_data
+
+                track_task = get_app_data().get("track_task")
+                if track_task:
+                    track_task(task)
 
         recovered.append(session)
         logger.info(f"Recovered session {color} #{number} '{alias}'")

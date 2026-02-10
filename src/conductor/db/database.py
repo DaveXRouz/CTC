@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import aiosqlite
 
 from conductor.config import DB_PATH
@@ -69,10 +71,19 @@ CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type, acknowledged);
 """
 
 _db: aiosqlite.Connection | None = None
+_db_lock = asyncio.Lock()
 
 
 async def init_database(db_path: str | None = None) -> aiosqlite.Connection:
-    """Initialize SQLite with WAL mode and create tables."""
+    """Initialize SQLite with WAL mode and create tables.
+
+    Args:
+        db_path: Override path for the database file. Defaults to
+            ``~/.conductor/conductor.db``.
+
+    Returns:
+        The opened ``aiosqlite.Connection`` with WAL mode enabled.
+    """
     global _db
     path = db_path or str(DB_PATH)
     logger.info(f"Initializing database at {path}")
@@ -90,15 +101,22 @@ async def init_database(db_path: str | None = None) -> aiosqlite.Connection:
 
 
 async def get_db() -> aiosqlite.Connection:
-    """Get the database connection, initializing if needed."""
+    """Get the database connection, initializing if needed.
+
+    Returns:
+        The shared ``aiosqlite.Connection`` singleton.
+    """
     global _db
-    if _db is None:
-        _db = await init_database()
-    return _db
+    if _db is not None:
+        return _db
+    async with _db_lock:
+        if _db is None:
+            _db = await init_database()
+        return _db
 
 
 async def close_database() -> None:
-    """Close the database connection."""
+    """Close the database connection and reset the singleton."""
     global _db
     if _db:
         await _db.close()

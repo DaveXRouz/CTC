@@ -18,6 +18,14 @@ DB_PATH = CONDUCTOR_HOME / "conductor.db"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
+    """Load and parse a YAML file.
+
+    Args:
+        path: Path to the YAML file.
+
+    Returns:
+        Parsed dict, or empty dict if file doesn't exist or is empty.
+    """
     if path.exists():
         with open(path) as f:
             return yaml.safe_load(f) or {}
@@ -36,6 +44,11 @@ class Config:
         return cls._instance
 
     def load(self) -> None:
+        """Load configuration from .env and config.yaml.
+
+        Loads secrets from ``~/.conductor/.env`` via dotenv and preferences
+        from ``config.yaml``. Skips if already loaded (idempotent).
+        """
         if self._loaded:
             return
         # Load .env
@@ -53,7 +66,11 @@ class Config:
         self._loaded = True
 
     def validate(self) -> list[str]:
-        """Return list of missing required config values."""
+        """Return list of missing required config values.
+
+        Returns:
+            List of missing environment variable names. Empty list if all present.
+        """
         missing = []
         if not self.telegram_bot_token:
             missing.append("TELEGRAM_BOT_TOKEN")
@@ -139,7 +156,11 @@ class Config:
 
 
 def get_config() -> Config:
-    """Get the singleton config, loading it if needed."""
+    """Get the singleton config, loading it if needed.
+
+    Returns:
+        The shared ``Config`` instance with all settings loaded.
+    """
     cfg = Config()
     cfg.load()
     return cfg

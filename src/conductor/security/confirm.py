@@ -33,7 +33,16 @@ class ConfirmationManager:
     def request(
         self, user_id: int, action_type: str, session_id: str
     ) -> PendingConfirmation:
-        """Create a pending confirmation request."""
+        """Create a pending confirmation request.
+
+        Args:
+            user_id: Telegram user ID of the requester.
+            action_type: Type of action (e.g. ``'kill'``, ``'restart'``).
+            session_id: UUID of the target session.
+
+        Returns:
+            The created ``PendingConfirmation`` with TTL countdown started.
+        """
         key = self._key(user_id, action_type, session_id)
         conf = PendingConfirmation(
             user_id=user_id,
@@ -45,7 +54,19 @@ class ConfirmationManager:
         return conf
 
     def confirm(self, user_id: int, action_type: str, session_id: str) -> bool:
-        """Confirm a pending action. Returns True if valid and not expired."""
+        """Confirm a pending action.
+
+        Removes the confirmation from pending state. Returns False if the
+        confirmation was not found or has expired (TTL exceeded).
+
+        Args:
+            user_id: Telegram user ID.
+            action_type: Action type to confirm.
+            session_id: UUID of the target session.
+
+        Returns:
+            True if the confirmation was valid and not expired.
+        """
         key = self._key(user_id, action_type, session_id)
         conf = self._pending.pop(key, None)
         if conf is None:
@@ -53,12 +74,25 @@ class ConfirmationManager:
         return not conf.is_expired
 
     def cancel(self, user_id: int, action_type: str, session_id: str) -> bool:
-        """Cancel a pending confirmation."""
+        """Cancel a pending confirmation without executing the action.
+
+        Args:
+            user_id: Telegram user ID.
+            action_type: Action type to cancel.
+            session_id: UUID of the target session.
+
+        Returns:
+            True if a pending confirmation was found and removed.
+        """
         key = self._key(user_id, action_type, session_id)
         return self._pending.pop(key, None) is not None
 
     def cleanup_expired(self) -> list[PendingConfirmation]:
-        """Remove and return expired confirmations."""
+        """Remove and return all expired confirmations.
+
+        Returns:
+            List of ``PendingConfirmation`` objects that exceeded their TTL.
+        """
         expired = []
         for key in list(self._pending.keys()):
             if self._pending[key].is_expired:

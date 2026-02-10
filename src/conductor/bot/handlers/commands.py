@@ -20,7 +20,9 @@ from conductor.bot.keyboards import (
     status_keyboard,
     confirm_keyboard,
 )
+from conductor.security.redactor import redact_sensitive
 from conductor.sessions.manager import SessionManager
+from conductor.bot.handlers.callbacks import confirmation_mgr
 from conductor.utils.logger import get_logger
 
 logger = get_logger("conductor.bot.commands")
@@ -32,12 +34,18 @@ _session_manager: SessionManager | None = None
 
 
 def set_session_manager(manager: SessionManager) -> None:
+    """Inject the SessionManager instance for command handlers.
+
+    Args:
+        manager: The active SessionManager, set during startup in ``main.py``.
+    """
     global _session_manager
     _session_manager = manager
 
 
 def _mgr() -> SessionManager:
-    assert _session_manager is not None, "Session manager not initialized"
+    if _session_manager is None:
+        raise RuntimeError("Session manager not initialized")
     return _session_manager
 
 
@@ -47,16 +55,15 @@ def _mgr() -> SessionManager:
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     await message.answer(
-        "🎛️ <b>Welcome to Conductor!</b>\n\n"
-        "I'm your remote terminal command center. I monitor your tmux sessions, "
-        "relay alerts, and let you control everything from Telegram.\n\n"
-        "Quick start:\n"
-        "• /new cc ~/projects/myapp — Start a Claude Code session\n"
-        "• /new sh ~/projects/myapp — Start a shell session\n"
-        "• /status — View all sessions\n"
-        "• /help — Full command reference\n\n"
-        "Send me natural language too — I understand things like "
-        '"what\'s happening in CountWize?"',
+        "🎛️ <b>Conductor</b>\n\n"
+        "Remote terminal control from Telegram.\n"
+        "Monitor sessions, relay prompts, manage everything.\n\n"
+        "<b>Quick start</b>\n"
+        "/new cc ~/projects/myapp\n"
+        "/new sh ~/projects/myapp\n"
+        "/status — view all sessions\n"
+        "/help — full reference\n\n"
+        'Or just type naturally: "what\'s happening in CountWize?"',
         parse_mode="HTML",
     )
 
@@ -67,33 +74,25 @@ async def cmd_start(message: Message) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     await message.answer(
-        "📖 <b>Conductor Command Reference</b>\n\n"
-        "<b>Session Control:</b>\n"
-        "/new cc &lt;dir&gt; — Start Claude Code session\n"
-        "/new sh &lt;dir&gt; — Start shell session\n"
-        "/kill &lt;name|#&gt; — Kill session (confirms)\n"
-        "/restart &lt;name|#&gt; — Restart session\n"
-        "/pause &lt;name|#&gt; — Pause session\n"
-        "/resume &lt;name|#&gt; — Resume session\n"
-        "/rename &lt;#&gt; &lt;name&gt; — Rename session\n\n"
-        "<b>Monitoring:</b>\n"
-        "/status — Session dashboard\n"
-        "/output &lt;name|#&gt; — AI summary of output\n"
-        "/log &lt;name|#&gt; — Full log as file\n"
-        "/tokens — Token usage\n"
-        "/digest — Full digest\n\n"
-        "<b>Input:</b>\n"
-        "/input &lt;name|#&gt; &lt;text&gt; — Send input\n"
-        "/run &lt;name|#&gt; &lt;cmd&gt; — Run command in session\n"
-        "/shell &lt;cmd&gt; — One-off shell command\n\n"
-        "<b>Auto-Responder:</b>\n"
-        "/auto list — Show rules\n"
-        '/auto add "pattern" "response"\n'
-        "/auto remove &lt;#&gt;\n"
-        "/auto pause / resume\n\n"
-        "<b>Settings:</b>\n"
-        "/quiet HH:MM-HH:MM — Quiet hours\n"
-        "/settings — View config",
+        "📖 <b>Command Reference</b>\n\n"
+        "<b>Sessions</b>\n"
+        "/new cc|sh &lt;dir&gt; — create session\n"
+        "/kill /restart /pause /resume &lt;name|#&gt;\n"
+        "/rename &lt;#&gt; &lt;name&gt;\n\n"
+        "<b>Monitor</b>\n"
+        "/status — dashboard\n"
+        "/output &lt;name|#&gt; — AI summary\n"
+        "/log &lt;name|#&gt; — full log file\n"
+        "/tokens — usage overview\n\n"
+        "<b>Input</b>\n"
+        "/input &lt;name|#&gt; &lt;text&gt;\n"
+        "/run &lt;name|#&gt; &lt;cmd&gt;\n"
+        "/shell &lt;cmd&gt; — one-off command\n\n"
+        "<b>Auto-Responder</b>\n"
+        "/auto list | add | remove | pause | resume\n\n"
+        "<b>Settings</b>\n"
+        "/quiet HH:MM-HH:MM — quiet hours\n"
+        "/settings — view config",
         parse_mode="HTML",
     )
 
@@ -175,6 +174,7 @@ async def cmd_kill(message: Message) -> None:
         await message.answer(f"❌ Session not found: {args[1]}")
         return
 
+    confirmation_mgr.request(message.from_user.id, "kill", session.id)
     await message.answer(
         f"⚠️ Confirm: Kill session {session_label(session)}?\n"
         "This will terminate the process. Unsaved work may be lost.\n\n"
@@ -294,7 +294,7 @@ async def cmd_output(message: Message) -> None:
     if monitor and hasattr(monitor, "output_buffer"):
         lines = monitor.output_buffer.rolling_buffer[-30:]
         if lines:
-            text = "\n".join(lines)
+            text = redact_sensitive("\n".join(lines))
             # Try AI summary if brain is available
             brain = app_data.get("brain")
             if brain:
@@ -338,7 +338,12 @@ async def cmd_log(message: Message) -> None:
         return
 
     if not session:
-        await message.answer(f"❌ Session not found.")
+        identifier = args[1] if len(args) > 1 else ""
+        await message.answer(
+            f"❌ Session not found: {identifier}"
+            if identifier
+            else "❌ Session not found."
+        )
         return
 
     from conductor.bot.bot import get_app_data
@@ -349,7 +354,7 @@ async def cmd_log(message: Message) -> None:
     if monitor and hasattr(monitor, "output_buffer"):
         lines = monitor.output_buffer.rolling_buffer
         if lines:
-            content = "\n".join(lines)
+            content = redact_sensitive("\n".join(lines))
             buf = io.BytesIO(content.encode("utf-8"))
             filename = f"{session.alias}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
             doc = BufferedInputFile(buf.read(), filename=filename)
@@ -475,12 +480,12 @@ async def cmd_tokens(message: Message) -> None:
     estimator = get_app_data().get("token_estimator")
 
     if not estimator:
-        await message.answer("Token tracking not available.")
+        await message.answer("📊 Token tracking not available.")
         return
 
     sessions = await mgr.list_sessions()
     if not sessions:
-        await message.answer("No active sessions.")
+        await message.answer("📊 No active sessions.\n\nUse /new to start one.")
         return
 
     lines = ["📊 <b>Token Usage</b>\n"]
@@ -489,17 +494,17 @@ async def cmd_tokens(message: Message) -> None:
         pct = usage["percentage"]
         warn = " ⚠️" if pct >= 80 else ""
         lines.append(
-            f"{s.color_emoji} {s.alias}: {pct}% ({usage['used']}/{usage['limit']}){warn}"
+            f"{s.color_emoji} {s.alias}  {pct}% ({usage['used']}/{usage['limit']}){warn}"
         )
 
     total = estimator.get_usage()
     lines.append(
-        f"\n<b>Total:</b> {total['percentage']}% ({total['used']}/{total['limit']})"
+        f"\n<b>Total</b>  {total['percentage']}% ({total['used']}/{total['limit']})"
     )
-    lines.append(f"Tier: {total['tier']}")
+    lines.append(f"Tier  <code>{total['tier']}</code>")
     if total["reset_in_seconds"]:
         mins = int(total["reset_in_seconds"] / 60)
-        lines.append(f"Resets in: {mins}m")
+        lines.append(f"Resets in  <code>{mins}m</code>")
 
     await message.answer("\n".join(lines), parse_mode="HTML")
 
@@ -526,7 +531,9 @@ async def cmd_auto(message: Message) -> None:
     if subcmd == "list":
         all_rules = await auto_rules.get_all_rules()
         if not all_rules:
-            await message.answer("No auto-response rules configured.")
+            await message.answer(
+                "📋 No auto-response rules.\n\nUse /auto add to create one."
+            )
             return
         lines = ["📋 <b>Auto-Response Rules</b>\n"]
         for r in all_rules:
@@ -549,7 +556,17 @@ async def cmd_auto(message: Message) -> None:
                 parse_mode="HTML",
             )
             return
-        rule_id = await auto_rules.add_rule(parts[0], parts[1])
+        pattern = parts[0]
+        if len(pattern) > 256:
+            await message.answer("❌ Pattern too long (max 256 characters).")
+            return
+        # Validate regex syntax
+        try:
+            _re.compile(pattern)
+        except _re.error as e:
+            await message.answer(f"❌ Invalid regex pattern: {e}")
+            return
+        rule_id = await auto_rules.add_rule(pattern, parts[1])
         await message.answer(
             f"✅ Added rule #{rule_id}: <code>{parts[0]}</code> → <code>{parts[1]}</code>",
             parse_mode="HTML",
@@ -598,6 +615,7 @@ async def cmd_restart(message: Message) -> None:
         await message.answer(f"❌ Session not found: {args[1]}")
         return
 
+    confirmation_mgr.request(message.from_user.id, "restart", session.id)
     await message.answer(
         f"⚠️ Confirm: Restart session {session_label(session)}?\n"
         "This will kill and recreate the session.\n\n"
@@ -620,13 +638,16 @@ async def cmd_quiet(message: Message) -> None:
         cfg = get_config()
         qh = cfg.quiet_hours
         if qh.get("enabled"):
+            tz = qh.get("timezone", "UTC")
             await message.answer(
-                f"🌙 Quiet hours: {qh.get('start', '23:00')} - {qh.get('end', '07:00')}\n"
-                f"Timezone: {qh.get('timezone', 'UTC')}",
+                f"🌙 <b>Quiet Hours</b>\n"
+                f"<code>{qh.get('start', '23:00')}</code> – <code>{qh.get('end', '07:00')}</code>  ({tz})",
+                parse_mode="HTML",
             )
         else:
             await message.answer(
-                "🌙 Quiet hours are disabled.\n" "Usage: /quiet HH:MM-HH:MM",
+                "🌙 Quiet hours are disabled.\nUse /quiet HH:MM-HH:MM to configure.",
+                parse_mode="HTML",
             )
         return
 
@@ -646,14 +667,17 @@ async def cmd_settings(message: Message) -> None:
     cfg = get_config()
 
     lines = [
-        "⚙️ <b>Conductor Settings</b>\n",
-        f"Plan tier: {cfg.plan_tier}",
-        f"Max sessions: {cfg.max_concurrent_sessions}",
-        f"Poll interval: {cfg.monitor_config.get('poll_interval_ms', 500)}ms",
-        f"Batch window: {cfg.batch_window_s}s",
-        f"AI model: {cfg.ai_model}",
-        f"Auto-responder: {'enabled' if cfg.auto_responder_config.get('enabled') else 'disabled'}",
-        f"Redaction: {'enabled' if cfg.security_config.get('redact_patterns') else 'disabled'}",
-        f"Quiet hours: {'enabled' if cfg.quiet_hours.get('enabled') else 'disabled'}",
+        "⚙️ <b>Settings</b>\n",
+        "<b>Sessions</b>",
+        f"Plan tier  <code>{cfg.plan_tier}</code>",
+        f"Max concurrent  <code>{cfg.max_concurrent_sessions}</code>",
+        f"Poll interval  <code>{cfg.monitor_config.get('poll_interval_ms', 500)}ms</code>\n",
+        "<b>Intelligence</b>",
+        f"AI model  <code>{cfg.ai_model}</code>",
+        f"Batch window  <code>{cfg.batch_window_s}s</code>",
+        f"Auto-responder  <code>{'enabled' if cfg.auto_responder_config.get('enabled') else 'disabled'}</code>\n",
+        "<b>Security</b>",
+        f"Redaction  <code>{'enabled' if cfg.security_config.get('redact_patterns') else 'disabled'}</code>",
+        f"Quiet hours  <code>{'enabled' if cfg.quiet_hours.get('enabled') else 'disabled'}</code>",
     ]
     await message.answer("\n".join(lines), parse_mode="HTML")

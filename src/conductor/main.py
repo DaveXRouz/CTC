@@ -33,7 +33,12 @@ from conductor.db import queries as db_queries
 
 
 async def run() -> None:
-    """Main async entry point."""
+    """Main async entry point -- initialize all subsystems and start polling.
+
+    Initializes config, database, session manager, bot, notifier, AI brain,
+    auto-responder, token estimator, monitors, and sleep handler. Starts
+    Telegram polling and waits for SIGINT/SIGTERM to shut down gracefully.
+    """
     CONDUCTOR_HOME.mkdir(parents=True, exist_ok=True)
 
     # Load config
@@ -58,6 +63,11 @@ async def run() -> None:
     # Init database
     await init_database()
     logger.info("Database initialized")
+
+    # Prune old events/commands
+    pruned = await db_queries.prune_old_records(max_age_days=30)
+    if pruned:
+        logger.info(f"Pruned {pruned} old records from events/commands tables")
 
     # Seed default auto-response rules
     auto_rules = cfg.auto_responder_config.get("default_rules", [])
@@ -91,18 +101,49 @@ async def run() -> None:
     token_estimator = TokenEstimator()
     set_app_data("token_estimator", token_estimator)
 
+    # C7: Wire ConfirmationManager for server-side TTL enforcement
+    from conductor.bot.handlers.callbacks import confirmation_mgr
+
+    set_app_data("confirmation_mgr", confirmation_mgr)
+
+    # C8: Wire ErrorHandler into main flow
+    from conductor.utils.errors import ErrorHandler
+
+    error_handler = ErrorHandler(notifier=notifier)
+    await error_handler.start()
+    set_app_data("error_handler", error_handler)
+
     # Monitor store
     monitors: dict[str, OutputMonitor] = {}
+    monitor_tasks: dict[str, asyncio.Task] = {}
     set_app_data("monitors", monitors)
+    set_app_data("monitor_tasks", monitor_tasks)
+
+    # Background task tracking — prevent fire-and-forget exceptions from being silently lost
+    background_tasks: set[asyncio.Task] = set()
+    set_app_data("background_tasks", background_tasks)
+
+    def _track_task(task: asyncio.Task) -> None:
+        """Add task to tracked set with done callback for logging exceptions."""
+        background_tasks.add(task)
+        task.add_done_callback(_on_task_done)
+
+    def _on_task_done(task: asyncio.Task) -> None:
+        background_tasks.discard(task)
+        if not task.cancelled() and task.exception():
+            logger.error(f"Background task failed: {task.exception()}")
+
+    set_app_data("track_task", _track_task)
 
     # Event handler for monitors
     async def on_monitor_event(session, result, lines):
         """Handle detected events from monitors."""
         text = "\n".join(lines[-10:])
 
+        # Permission prompt — always send immediately with keyboard
         if result.type == "permission_prompt":
             msg = format_event(
-                "❓", session, f"Waiting for input:\n<code>{text[:500]}</code>"
+                "❓", session, f"Waiting for input:\n\n<code>{text[:500]}</code>"
             )
             msg_id = await notifier.send_immediate(
                 msg, reply_markup=permission_keyboard(session.id)
@@ -120,6 +161,7 @@ async def run() -> None:
                 )
             )
 
+        # Input prompt — try auto-responder first, then notify
         elif result.type == "input_prompt":
             # Check auto-responder first
             auto_result = await auto_responder.check_and_respond(text)
@@ -143,7 +185,7 @@ async def run() -> None:
                 )
             else:
                 msg = format_event(
-                    "❓", session, f"Waiting for input:\n<code>{text[:500]}</code>"
+                    "❓", session, f"Waiting for input:\n\n<code>{text[:500]}</code>"
                 )
                 await notifier.send_immediate(
                     msg, reply_markup=permission_keyboard(session.id)
@@ -152,12 +194,13 @@ async def run() -> None:
                 session.status = "waiting"
                 set_app_data("last_prompt_session", session.id)
 
+        # Rate limit — auto-pause session and notify
         elif result.type == "rate_limit":
             await session_manager.pause_session(session.id)
             msg = format_event(
                 "⚠️",
                 session,
-                f"Rate Limited\nPaused automatically.\n\n<code>{result.matched_text}</code>",
+                f"Rate Limited — paused automatically.\n\n<code>{result.matched_text}</code>",
             )
             await notifier.send_immediate(
                 msg, reply_markup=rate_limit_keyboard(session.id)
@@ -170,9 +213,10 @@ async def run() -> None:
                 )
             )
 
+        # Error — notify immediately
         elif result.type == "error":
             msg = format_event(
-                "🔴", session, f"Error detected:\n<code>{text[:500]}</code>"
+                "🔴", session, f"Error detected\n\n<code>{text[:500]}</code>"
             )
             await notifier.send_immediate(msg)
             await db_queries.update_session(session.id, status="error")
@@ -181,6 +225,7 @@ async def run() -> None:
                 Event(session_id=session.id, event_type="error", message=text[:500])
             )
 
+        # Completion — AI summarize + suggest
         elif result.type == "completion":
             summary = await brain.summarize("\n".join(lines[-50:]))
             suggestions = await brain.suggest(
@@ -198,7 +243,7 @@ async def run() -> None:
                 if suggestions
                 else completion_keyboard(session.id)
             )
-            msg = format_event("✅", session, f"Task Complete\n{summary}")
+            msg = format_event("✅", session, f"Task Complete\n\n{summary}")
             if suggestions:
                 labels = ", ".join(s.get("label", "") for s in suggestions)
                 msg += f"\n\n💡 Suggested: {labels}"
@@ -207,22 +252,24 @@ async def run() -> None:
                 Event(session_id=session.id, event_type="completed", message=summary)
             )
 
-        # Track token usage on response completion
-        token_estimator.on_claude_response(session.id)
-        threshold = token_estimator.check_thresholds()
-        if threshold:
-            usage = token_estimator.get_usage(session.id)
-            warn_msg = format_event(
-                "⚠️", session, f"Token usage at {usage['percentage']}%"
-            )
-            await notifier.send(warn_msg, disable_notification=(threshold == "warning"))
-            await db_queries.log_event(
-                Event(
-                    session_id=session.id,
-                    event_type="token_warning",
-                    message=f"{usage['percentage']}%",
+            # C2: Track token usage only on completion events (not all event types)
+            token_estimator.on_claude_response(session.id)
+            threshold = token_estimator.check_thresholds()
+            if threshold:
+                usage = token_estimator.get_usage(session.id)
+                warn_msg = format_event(
+                    "⚠️", session, f"Token usage at {usage['percentage']}%"
                 )
-            )
+                await notifier.send(
+                    warn_msg, disable_notification=(threshold == "warning")
+                )
+                await db_queries.log_event(
+                    Event(
+                        session_id=session.id,
+                        event_type="token_warning",
+                        message=f"{usage['percentage']}%",
+                    )
+                )
 
     # Start monitors for existing sessions
     for session in await session_manager.list_sessions():
@@ -230,14 +277,14 @@ async def run() -> None:
         if pane:
             monitor = OutputMonitor(pane, session, on_event=on_monitor_event)
             monitors[session.id] = monitor
-            asyncio.create_task(monitor.start())
+            monitor_tasks[session.id] = asyncio.create_task(monitor.start())
 
     # Recover sessions from previous run
     try:
         recovered = await recover_sessions(session_manager, monitors, on_monitor_event)
         if recovered:
             await notifier.send_immediate(
-                f"🔄 Conductor restarted. Recovered {len(recovered)} session(s)."
+                f"🔄 Conductor restarted — recovered {len(recovered)} session(s)."
             )
     except Exception as e:
         logger.warning(f"Session recovery failed: {e}")
@@ -250,11 +297,14 @@ async def run() -> None:
         mins = int(sleep_duration // 60)
         secs = int(sleep_duration % 60)
         logger.info(f"Mac woke up after {mins}m {secs}s sleep")
-        # Health check all sessions
-        for sid, monitor in monitors.items():
+        # Health check all sessions — cancel tasks for dead sessions
+        for sid in list(monitors.keys()):
             pane = session_manager.get_pane(sid)
             if pane is None:
-                await monitor.stop()
+                await monitors[sid].stop()
+                task = monitor_tasks.pop(sid, None)
+                if task and not task.done():
+                    task.cancel()
         await notifier.send_immediate(
             f"💤 Mac slept for {mins}m {secs}s — session health check done."
         )
@@ -272,11 +322,21 @@ async def run() -> None:
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # C9: Periodic cleanup of expired confirmations
+    async def _cleanup_confirmations_loop():
+        while True:
+            await asyncio.sleep(30)
+            expired = confirmation_mgr.cleanup_expired()
+            if expired:
+                logger.debug(f"Cleaned up {len(expired)} expired confirmations")
+
     logger.info("🚀 Conductor is online! Polling for Telegram messages...")
 
     try:
         polling_task = asyncio.create_task(dp.start_polling(bot))
         connectivity_task = asyncio.create_task(notifier.connectivity_check())
+        cleanup_task = asyncio.create_task(_cleanup_confirmations_loop())
+        _track_task(cleanup_task)
 
         await shutdown_event.wait()
 
@@ -285,8 +345,13 @@ async def run() -> None:
         polling_task.cancel()
         connectivity_task.cancel()
         await sleep_handler.stop()
+        await error_handler.stop()
+        cleanup_task.cancel()
         for m in monitors.values():
             await m.stop()
+        for task in monitor_tasks.values():
+            if not task.done():
+                task.cancel()
         await notifier.stop()
 
         try:

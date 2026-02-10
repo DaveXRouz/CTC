@@ -21,7 +21,8 @@ class Notifier:
     def __init__(self, bot: Bot, chat_id: int) -> None:
         self.bot = bot
         self.chat_id = chat_id
-        self._queue: asyncio.Queue[tuple[str, dict[str, Any]]] = asyncio.Queue()
+        self._queue: asyncio.Queue[tuple[str, dict[str, Any], int]] = asyncio.Queue()
+        self._max_retries = 5
         self._batch_buffer: list[tuple[str, dict[str, Any]]] = []
         self._batch_task: asyncio.Task | None = None
         self._running = False
@@ -31,12 +32,12 @@ class Notifier:
         self._batch_window = cfg.batch_window_s
 
     async def start(self) -> None:
-        """Start the batch flusher."""
+        """Start the background batch flusher loop."""
         self._running = True
         self._batch_task = asyncio.create_task(self._batch_loop())
 
     async def stop(self) -> None:
-        """Stop and flush remaining."""
+        """Stop the batch flusher and flush any remaining buffered messages."""
         self._running = False
         if self._batch_task:
             self._batch_task.cancel()
@@ -52,7 +53,19 @@ class Notifier:
         reply_markup: InlineKeyboardMarkup | None = None,
         disable_notification: bool = False,
     ) -> int | None:
-        """Send a notification. Returns message_id on success."""
+        """Queue a notification for batched delivery.
+
+        Messages are buffered and combined if multiple arrive within the batch
+        window. If the batch window is 0, sends immediately.
+
+        Args:
+            text: Message text (HTML). Sensitive data is auto-redacted.
+            reply_markup: Optional inline keyboard.
+            disable_notification: If True, send silently.
+
+        Returns:
+            Message ID if sent immediately, or None if batched for later.
+        """
         text = redact_sensitive(text)
         kwargs: dict[str, Any] = {"parse_mode": "HTML"}
         if reply_markup:
@@ -73,7 +86,18 @@ class Notifier:
         reply_markup: InlineKeyboardMarkup | None = None,
         disable_notification: bool = False,
     ) -> int | None:
-        """Send immediately, bypassing batch queue."""
+        """Send a notification immediately, bypassing the batch queue.
+
+        Use this for urgent notifications (permission prompts, errors).
+
+        Args:
+            text: Message text (HTML). Sensitive data is auto-redacted.
+            reply_markup: Optional inline keyboard.
+            disable_notification: If True, send silently.
+
+        Returns:
+            Message ID on success, or None if offline (message queued).
+        """
         text = redact_sensitive(text)
         kwargs: dict[str, Any] = {"parse_mode": "HTML"}
         if reply_markup:
@@ -83,7 +107,15 @@ class Notifier:
         return await self._send_direct(text, kwargs)
 
     async def _send_direct(self, text: str, kwargs: dict) -> int | None:
-        """Try to send; queue if offline."""
+        """Attempt direct send to Telegram; queue message if offline.
+
+        Args:
+            text: Message text.
+            kwargs: Additional send_message keyword arguments.
+
+        Returns:
+            Message ID on success, or None if send failed (message queued).
+        """
         try:
             msg = await self.bot.send_message(self.chat_id, text, **kwargs)
             self.is_online = True
@@ -91,20 +123,24 @@ class Notifier:
             return msg.message_id
         except Exception as e:
             self.is_online = False
-            await self._queue.put((text, kwargs))
+            await self._queue.put((text, kwargs, 1))
             logger.warning(
                 f"Queued notification (offline): {e}. Queue: {self._queue.qsize()}"
             )
             return None
 
     async def _batch_loop(self) -> None:
-        """Flush batch buffer every batch_window seconds."""
+        """Background loop that flushes the batch buffer at regular intervals."""
         while self._running:
             await asyncio.sleep(self._batch_window)
             await self._flush_batch()
 
     async def _flush_batch(self) -> None:
-        """Send all buffered messages."""
+        """Flush all buffered messages.
+
+        Single messages are sent as-is. Multiple messages are combined into
+        one message prefixed with the update count.
+        """
         if not self._batch_buffer:
             return
 
@@ -115,27 +151,48 @@ class Notifier:
             text, kwargs = items[0]
             await self._send_direct(text, kwargs)
         else:
-            # Combine into one message
-            combined = f"📬 {len(items)} Updates:\n\n"
-            combined += "\n\n".join(text for text, _ in items)
-            # Use kwargs from the first item as base
-            kwargs = items[0][1].copy()
-            kwargs.pop("reply_markup", None)
-            await self._send_direct(combined, kwargs)
+            # C4: Send messages with keyboards separately to preserve reply_markup
+            keyboard_items = [(t, k) for t, k in items if "reply_markup" in k]
+            plain_items = [(t, k) for t, k in items if "reply_markup" not in k]
+
+            # Combine plain text messages into one
+            if plain_items:
+                if len(plain_items) == 1:
+                    await self._send_direct(plain_items[0][0], plain_items[0][1])
+                else:
+                    combined = f"📬 {len(plain_items)} Updates:\n\n"
+                    combined += "\n\n".join(text for text, _ in plain_items)
+                    kwargs = plain_items[0][1].copy()
+                    await self._send_direct(combined, kwargs)
+
+            # Send keyboard messages individually
+            for text, kwargs in keyboard_items:
+                await self._send_direct(text, kwargs)
 
     async def _flush_offline_queue(self) -> None:
-        """Send all queued messages from offline period."""
+        """Send all queued messages accumulated during offline periods.
+
+        Processes the queue sequentially with a 100ms delay between sends
+        to respect Telegram rate limits. Stops on first failure.
+        """
         while not self._queue.empty():
-            text, kwargs = await self._queue.get()
+            text, kwargs, retries = await self._queue.get()
             try:
                 await self.bot.send_message(self.chat_id, text, **kwargs)
                 await asyncio.sleep(0.1)  # Respect rate limits
             except Exception:
-                await self._queue.put((text, kwargs))
+                if retries < self._max_retries:
+                    await self._queue.put((text, kwargs, retries + 1))
+                else:
+                    logger.warning(f"Discarding message after {retries} retries")
                 break
 
     async def connectivity_check(self) -> None:
-        """Background task to check if Telegram is reachable."""
+        """Background task that checks Telegram connectivity every 30 seconds.
+
+        When the bot is offline, periodically calls ``get_me()`` to detect
+        when connectivity returns, then flushes the offline queue.
+        """
         while self._running:
             if not self.is_online:
                 try:

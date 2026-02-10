@@ -25,7 +25,19 @@ class AIBrain:
         self._timeout = cfg.ai_timeout
 
     async def _call(self, prompt: str, max_tokens: int = 200) -> str:
-        """Make an API call to Claude Haiku with timeout."""
+        """Make an API call to Claude Haiku with timeout.
+
+        Args:
+            prompt: User message to send.
+            max_tokens: Maximum response length (default 200).
+
+        Returns:
+            The text content of the first response block.
+
+        Raises:
+            asyncio.TimeoutError: If the call exceeds ``ai_timeout`` seconds.
+            Exception: On any Anthropic API error.
+        """
         try:
             response = await asyncio.wait_for(
                 self._client.messages.create(
@@ -35,6 +47,8 @@ class AIBrain:
                 ),
                 timeout=self._timeout,
             )
+            if not response.content:
+                raise ValueError("Empty response from Haiku API")
             return response.content[0].text
         except asyncio.TimeoutError:
             logger.warning("Haiku API timeout")
@@ -44,7 +58,16 @@ class AIBrain:
             raise
 
     async def summarize(self, terminal_output: str) -> str:
-        """Summarize terminal output. Falls back to raw output on failure."""
+        """Summarize terminal output into 2-4 sentences.
+
+        Falls back to raw last-N-lines output if the API call fails.
+
+        Args:
+            terminal_output: Raw terminal text (last 3000 chars are used).
+
+        Returns:
+            AI-generated summary, or raw fallback text on failure.
+        """
         cfg = get_config()
         prompt = SUMMARIZE_PROMPT.format(terminal_output=terminal_output[-3000:])
         try:
@@ -61,7 +84,18 @@ class AIBrain:
         session_type: str = "",
         working_dir: str = "",
     ) -> list[dict[str, str]]:
-        """Suggest next actions. Returns list of {label, command}."""
+        """Suggest 1-3 next actions based on terminal output and session context.
+
+        Args:
+            terminal_output: Raw terminal text (last 2000 chars are used).
+            project_alias: Human-readable project name.
+            session_type: Session type (``'claude-code'`` or ``'shell'``).
+            working_dir: Session working directory.
+
+        Returns:
+            List of dicts with ``'label'`` and ``'command'`` keys, or empty
+            list on failure.
+        """
         cfg = get_config()
         prompt = SUGGEST_PROMPT.format(
             terminal_output=terminal_output[-2000:],
@@ -74,7 +108,7 @@ class AIBrain:
                 prompt, max_tokens=cfg.ai_config.get("suggestion_max_tokens", 300)
             )
             return json.loads(text)
-        except (json.JSONDecodeError, Exception) as e:
+        except Exception as e:
             logger.warning(f"Suggestion parse error: {e}")
             return []
 
@@ -84,7 +118,17 @@ class AIBrain:
         session_list_json: str = "[]",
         last_prompt_context: str = "None",
     ) -> dict:
-        """Parse natural language into a structured command."""
+        """Parse natural language into a structured command via AI.
+
+        Args:
+            user_message: Free-text message from the user.
+            session_list_json: JSON string of active sessions for context.
+            last_prompt_context: Description of the last pending prompt, or ``"None"``.
+
+        Returns:
+            Dict with ``'command'``, ``'session'``, ``'args'``, and ``'confidence'``
+            keys. Returns ``{'command': 'unknown', 'confidence': 0.0}`` on failure.
+        """
         cfg = get_config()
         prompt = NLP_PARSE_PROMPT.format(
             user_message=user_message,
@@ -97,6 +141,6 @@ class AIBrain:
             )
             result = json.loads(text)
             return result
-        except (json.JSONDecodeError, Exception) as e:
+        except Exception as e:
             logger.warning(f"NLP parse error: {e}")
             return {"command": "unknown", "confidence": 0.0}

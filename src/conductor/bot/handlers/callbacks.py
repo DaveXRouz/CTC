@@ -9,11 +9,14 @@ from aiogram.types import CallbackQuery
 
 from conductor.bot.formatter import session_label, format_status_dashboard
 from conductor.bot.keyboards import status_keyboard
+from conductor.security.confirm import ConfirmationManager
 from conductor.utils.logger import get_logger
 
 logger = get_logger("conductor.bot.callbacks")
 
 router = Router()
+
+confirmation_mgr = ConfirmationManager()
 
 
 def _get_mgr():
@@ -39,7 +42,16 @@ async def handle_confirm(callback: CallbackQuery) -> None:
         return
 
     if decision == "no":
+        confirmation_mgr.cancel(callback.from_user.id, action, session_id)
         await callback.message.edit_text("↩️ Action cancelled.")
+        await callback.answer()
+        return
+
+    # TTL check — reject expired confirmations
+    if not confirmation_mgr.confirm(callback.from_user.id, action, session_id):
+        await callback.message.edit_text(
+            "⏰ Confirmation expired. Please re-issue the command."
+        )
         await callback.answer()
         return
 
@@ -113,7 +125,7 @@ async def handle_permission(callback: CallbackQuery) -> None:
                 parse_mode="HTML",
             )
         else:
-            await callback.message.answer("No context available.")
+            await callback.message.answer("👀 No context available.")
     elif decision == "custom":
         await callback.message.answer(
             f"✏️ Type your response for {session_label(session)}:\n"
@@ -154,10 +166,15 @@ async def handle_rate_limit(callback: CallbackQuery) -> None:
         await callback.message.edit_text(
             f"⏰ {session_label(session)} will auto-resume in 15 minutes."
         )
-        # Schedule auto-resume
-        asyncio.create_task(_auto_resume(mgr, session_id, 15, callback))
+        # Schedule auto-resume (tracked to log exceptions)
+        from conductor.bot.bot import get_app_data
+
+        track_task = get_app_data().get("track_task")
+        task = asyncio.create_task(_auto_resume(mgr, session_id, 15, callback))
+        if track_task:
+            track_task(task)
     elif action == "switch":
-        await callback.message.answer("Use /new to start a different task.")
+        await callback.message.answer("↪️ Use /new to start a different task.")
 
     await callback.answer()
 
@@ -210,7 +227,7 @@ async def handle_completion(callback: CallbackQuery) -> None:
         await cmd_log(callback.message)
     elif action == "new":
         await callback.message.answer(
-            "Type your next task instruction and I'll send it to the session."
+            "⏭️ Type your next task instruction and I'll send it to the session."
         )
 
     await callback.answer()
@@ -276,7 +293,7 @@ async def handle_undo(callback: CallbackQuery) -> None:
     action_id = callback.data.split(":", 1)[1] if ":" in callback.data else ""
     # Undo logic will be handled by auto-responder in Phase 3
     await callback.message.edit_text(
-        "🔙 Auto-response undone. (Manual action required)"
+        "🔙 Auto-response cancelled. Send a manual reply if needed."
     )
     await callback.answer()
 
@@ -296,6 +313,6 @@ async def handle_session_pick(callback: CallbackQuery) -> None:
         session = mgr.get_session(session_id)
         if session:
             await callback.message.edit_text(
-                f"Selected: {session_label(session)}. Now type your message."
+                f"👆 Selected {session_label(session)}. Now type your message."
             )
     await callback.answer()

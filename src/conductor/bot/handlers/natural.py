@@ -17,7 +17,17 @@ router = Router()
 
 @router.message()
 async def handle_natural_language(message: Message) -> None:
-    """Handle non-command messages via NLP parsing."""
+    """Handle non-command messages via NLP parsing.
+
+    Processing order:
+    1. Quick prompt responses (short text -> last active session)
+    2. AI NLP parsing via brain.parse_nlp()
+    3. Single-session fallback (send text to the only active session)
+    4. Fallback error message
+
+    Args:
+        message: Incoming Telegram message.
+    """
     text = (message.text or "").strip()
     if not text or text.startswith("/"):
         return
@@ -30,7 +40,7 @@ async def handle_natural_language(message: Message) -> None:
     mgr = _session_manager
 
     if not mgr:
-        await message.answer("Bot is still initializing. Try again shortly.")
+        await message.answer("⏳ Bot is still initializing. Try again shortly.")
         return
 
     # Quick check: if only one session and text looks like a response (short, y/n, number)
@@ -40,7 +50,15 @@ async def handle_natural_language(message: Message) -> None:
     if last_prompt_session and len(text) <= 10:
         # Likely a response to a pending prompt
         session = mgr.get_session(last_prompt_session)
-        if session:
+        if session and session.status == "waiting":
+            from conductor.sessions.detector import has_destructive_keyword
+
+            if has_destructive_keyword(text):
+                await message.answer(
+                    "⚠️ Blocked: destructive keyword detected. "
+                    "Use /input to send explicitly."
+                )
+                return
             from conductor.bot.formatter import session_label
 
             mgr.send_input(session.id, text)
@@ -90,7 +108,13 @@ async def handle_natural_language(message: Message) -> None:
 
 
 async def _dispatch_nlp_command(message: Message, result: dict, mgr) -> None:
-    """Dispatch a parsed NLP command to the appropriate handler."""
+    """Dispatch a parsed NLP command to the appropriate slash command handler.
+
+    Args:
+        message: Original Telegram message (text may be overwritten for dispatch).
+        result: Parsed NLP result dict with 'command', 'session', 'args' keys.
+        mgr: The active SessionManager instance.
+    """
     command = result.get("command", "")
     session_ref = result.get("session")
     args = result.get("args", {})

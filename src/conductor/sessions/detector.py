@@ -8,7 +8,17 @@ from dataclasses import dataclass
 
 @dataclass
 class DetectionResult:
-    type: str  # 'permission_prompt', 'input_prompt', 'rate_limit', 'error', 'completion', 'none'
+    """Result of classifying terminal output against known patterns.
+
+    Attributes:
+        type: Event category — one of ``'permission_prompt'``, ``'input_prompt'``,
+            ``'rate_limit'``, ``'error'``, ``'completion'``, or ``'none'``.
+        matched_text: The substring that triggered the match (empty if none).
+        pattern: The regex pattern string that matched (empty if none).
+        confidence: Match confidence, currently always ``1.0``.
+    """
+
+    type: str
     matched_text: str = ""
     pattern: str = ""
     confidence: float = 1.0
@@ -117,13 +127,32 @@ _COMPILED: dict[str, list[re.Pattern]] = {}
 
 
 def _compile(name: str, patterns: list[str]) -> list[re.Pattern]:
+    """Compile and cache a named group of regex patterns.
+
+    Args:
+        name: Cache key for this pattern group.
+        patterns: Raw regex strings to compile with ``re.MULTILINE``.
+
+    Returns:
+        List of compiled regex patterns (cached after first call).
+    """
     if name not in _COMPILED:
         _COMPILED[name] = [re.compile(p, re.MULTILINE) for p in patterns]
     return _COMPILED[name]
 
 
 def _match_any(text: str, name: str, patterns: list[str]) -> tuple[bool, str, str]:
-    """Check if text matches any pattern in the list. Returns (matched, matched_text, pattern)."""
+    """Check if text matches any pattern in a named group.
+
+    Args:
+        text: Terminal output to test.
+        name: Cache key for ``_compile()``.
+        patterns: Raw regex strings.
+
+    Returns:
+        Tuple of ``(matched, matched_text, pattern_string)``. On no match,
+        returns ``(False, "", "")``.
+    """
     for compiled in _compile(name, patterns):
         m = compiled.search(text)
         if m:
@@ -132,7 +161,14 @@ def _match_any(text: str, name: str, patterns: list[str]) -> tuple[bool, str, st
 
 
 def has_destructive_keyword(text: str) -> bool:
-    """Check if text contains any destructive keywords."""
+    """Check if text contains any destructive keywords (case-insensitive).
+
+    Args:
+        text: Terminal output to scan.
+
+    Returns:
+        ``True`` if any keyword from ``DESTRUCTIVE_KEYWORDS`` appears in the text.
+    """
     text_lower = text.lower()
     return any(kw in text_lower for kw in DESTRUCTIVE_KEYWORDS)
 
@@ -141,7 +177,18 @@ class PatternDetector:
     """Classify terminal output by pattern matching."""
 
     def classify(self, text: str) -> DetectionResult:
-        """Classify text into an event type. Priority order per Section 13."""
+        """Classify terminal output into an event type.
+
+        Tests ``text`` against five pattern groups in strict priority order:
+        permission_prompt > input_prompt > rate_limit > error > completion.
+        Returns on the first match. If nothing matches, returns type ``'none'``.
+
+        Args:
+            text: Raw terminal output (may be multi-line).
+
+        Returns:
+            A ``DetectionResult`` with the matched type, text, and pattern.
+        """
         # Priority 1: Permission prompts
         matched, mtext, pattern = _match_any(text, "perm", PERMISSION_PROMPT_PATTERNS)
         if matched:

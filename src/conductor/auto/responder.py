@@ -30,7 +30,20 @@ class AutoResponder:
     """Match prompts against rules and auto-respond if safe."""
 
     def check(self, text: str, rules: list[AutoRule] | None = None) -> AutoResponse:
-        """Check if text should be auto-responded to (synchronous for tests)."""
+        """Check if text matches an auto-response rule (synchronous).
+
+        Enforces safety guards before rule matching: blocks permission prompts
+        and text containing destructive keywords.
+
+        Args:
+            text: Terminal output to check.
+            rules: Rules to match against. If None, uses default rules from config.
+
+        Returns:
+            ``AutoResponse`` with ``should_respond=True`` and the response text
+            if a rule matched, or ``should_respond=False`` with an optional
+            ``block_reason``.
+        """
         # Safety: never auto-respond to permission prompts
         for pattern in PERMISSION_PROMPT_PATTERNS:
             if re.search(pattern, text, re.MULTILINE):
@@ -74,7 +87,17 @@ class AutoResponder:
         return AutoResponse(should_respond=False)
 
     async def check_and_respond(self, text: str) -> AutoResponse:
-        """Check against DB rules (async version)."""
+        """Check text against database rules and record hits (async).
+
+        Same safety guards as ``check()``, but loads rules from the database
+        and increments hit counts on match.
+
+        Args:
+            text: Terminal output to check.
+
+        Returns:
+            ``AutoResponse`` with match result and rule details.
+        """
         # Safety checks first (same as sync)
         for pattern in PERMISSION_PROMPT_PATTERNS:
             if re.search(pattern, text, re.MULTILINE):
@@ -106,10 +129,22 @@ class AutoResponder:
 
     @staticmethod
     def _matches(text: str, rule: AutoRule) -> bool:
-        """Check if text matches a rule."""
+        """Check if text matches a single auto-response rule.
+
+        Args:
+            text: Terminal output to test.
+            rule: AutoRule with pattern and match_type.
+
+        Returns:
+            True if the rule's pattern matches the text.
+        """
         if rule.match_type == "exact":
             return text.strip() == rule.pattern
         elif rule.match_type == "regex":
-            return bool(re.search(rule.pattern, text))
+            try:
+                return bool(re.search(rule.pattern, text))
+            except re.error:
+                logger.warning(f"Invalid regex in rule #{rule.id}: {rule.pattern!r}")
+                return False
         else:  # contains
             return rule.pattern in text

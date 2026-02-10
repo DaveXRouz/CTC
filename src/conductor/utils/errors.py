@@ -18,7 +18,7 @@ class ErrorHandler:
         self._reset_task: asyncio.Task | None = None
 
     async def start(self) -> None:
-        """Start periodic error count reset."""
+        """Start the background task that resets error counts every 5 minutes."""
         self._reset_task = asyncio.create_task(self._periodic_reset())
 
     async def stop(self) -> None:
@@ -26,7 +26,12 @@ class ErrorHandler:
             self._reset_task.cancel()
 
     async def handle(self, error: Exception, context: str) -> None:
-        """Global error handler — log, count, and decide recovery."""
+        """Handle an error: log it, increment its count, and escalate if repeated.
+
+        Args:
+            error: The exception that occurred.
+            context: Description of where the error happened.
+        """
         error_type = type(error).__name__
         self.error_counts[error_type] = self.error_counts.get(error_type, 0) + 1
 
@@ -36,7 +41,12 @@ class ErrorHandler:
             await self._escalate(error_type, context)
 
     async def _escalate(self, error_type: str, context: str) -> None:
-        """Alert user about repeated errors."""
+        """Alert user about repeated errors via Telegram notification.
+
+        Args:
+            error_type: Exception class name.
+            context: Description of where the error originated.
+        """
         if self.notifier:
             try:
                 await self.notifier.send_immediate(
@@ -48,7 +58,7 @@ class ErrorHandler:
                 logger.critical(f"Cannot notify user about {error_type}")
 
     async def _periodic_reset(self) -> None:
-        """Reset error counts every 5 minutes."""
+        """Background loop that resets error counts every 5 minutes."""
         while True:
             await asyncio.sleep(300)
             self.error_counts.clear()
