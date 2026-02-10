@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from conductor.config import get_config
 from conductor.sessions.detector import (
     PERMISSION_PROMPT_PATTERNS,
-    DESTRUCTIVE_KEYWORDS,
     has_destructive_keyword,
 )
 from conductor.auto.rules import get_active_rules, record_hit
@@ -56,7 +55,7 @@ class AutoResponder:
         if has_destructive_keyword(text):
             return AutoResponse(
                 should_respond=False,
-                block_reason=f"Destructive keyword detected",
+                block_reason="Destructive keyword detected",
             )
 
         # Check against rules

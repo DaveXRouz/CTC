@@ -1,6 +1,5 @@
 """Tests for sensitive data redaction — Section 18.2."""
 
-import pytest
 from conductor.security.redactor import redact_sensitive
 
 

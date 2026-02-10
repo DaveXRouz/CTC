@@ -290,8 +290,7 @@ async def handle_suggestion(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("undo:"))
 async def handle_undo(callback: CallbackQuery) -> None:
-    action_id = callback.data.split(":", 1)[1] if ":" in callback.data else ""
-    # Undo logic will be handled by auto-responder in Phase 3
+    _action_id = callback.data.split(":", 1)[1] if ":" in callback.data else ""
     await callback.message.edit_text(
         "🔙 Auto-response cancelled. Send a manual reply if needed."
     )

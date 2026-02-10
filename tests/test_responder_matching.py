@@ -1,6 +1,6 @@
 """Tests for auto-responder matching logic — covers _matches and all match types."""
 
-from conductor.auto.responder import AutoResponder, AutoResponse
+from conductor.auto.responder import AutoResponder
 from conductor.db.models import AutoRule
 
 

@@ -4,9 +4,8 @@ send_input, resolve, rename, list, get, and helper functions."""
 from __future__ import annotations
 
 import logging
-import os
 import signal
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -278,7 +277,6 @@ class TestKillSession:
         mock_pane = MagicMock()
         mgr._panes["sid-1"] = mock_pane
 
-        mock_tmux = MagicMock()
         mock_tmux_session_list = [MagicMock()]
         mock_server = MagicMock()
         mock_server.sessions.filter.return_value = mock_tmux_session_list

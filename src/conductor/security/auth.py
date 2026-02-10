@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
-from aiogram.types import Message, CallbackQuery, Update
+from aiogram.types import Message, CallbackQuery
 
 from conductor.config import get_config
 from conductor.utils.logger import get_logger

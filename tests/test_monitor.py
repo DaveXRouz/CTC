@@ -4,7 +4,6 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from conductor.db.models import Session
 from conductor.sessions.detector import DetectionResult

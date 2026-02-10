@@ -1,9 +1,7 @@
 """Tests for Notifier — batching, offline queue, retry, redaction, lifecycle."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from conductor.bot.notifier import Notifier
 

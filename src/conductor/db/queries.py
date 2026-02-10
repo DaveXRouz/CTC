@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-import aiosqlite
 
 from conductor.db.database import get_db
 from conductor.db.models import AutoRule, Command, Event, Session

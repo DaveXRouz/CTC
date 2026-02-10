@@ -2,7 +2,6 @@
 
 import os
 import pytest
-from pathlib import Path
 from unittest.mock import patch
 
 from conductor.config import Config, _load_yaml, get_config

@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from unittest.mock import patch
 
 from conductor.utils import logger as logger_mod
 from conductor.utils.logger import setup_logging, get_logger

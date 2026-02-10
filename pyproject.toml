@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "conductor"
-version = "1.0.0"
+version = "1.1.0"
 description = "Remote terminal command center via Telegram"
 requires-python = ">=3.11"
 dependencies = [

@@ -22,9 +22,18 @@ htmlcov/
 # IDE
 .vscode/
 .idea/
+.claude/
 
-# State tracking
+# Worker state tracking
 .atlas-state.json
+.velvet-state.json
+.viper-state.json
+.sentinel-state.json
+.workers/
+.build-state.json
+
+# Build artifacts
+.maestro-report.md
 
 # OS
 .DS_Store

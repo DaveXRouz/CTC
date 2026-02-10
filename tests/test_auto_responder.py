@@ -1,6 +1,5 @@
 """Tests for auto-responder — Section 18.2."""
 
-import pytest
 from conductor.auto.responder import AutoResponder
 
 responder = AutoResponder()

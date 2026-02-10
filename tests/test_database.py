@@ -1,10 +1,8 @@
 """Tests for database init + async CRUD queries."""
 
-import asyncio
 import pytest
-import aiosqlite
 
-from conductor.db.database import init_database, close_database, get_db, SCHEMA, _db
+from conductor.db.database import init_database, close_database, get_db
 from conductor.db import database as db_module
 from conductor.db.models import Session, Command, AutoRule, Event
 from conductor.db import queries

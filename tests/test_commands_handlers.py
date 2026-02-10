@@ -6,7 +6,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conductor.db.models import Session, AutoRule
-from conductor.bot.handlers import commands
 from conductor.bot.handlers.commands import (
     set_session_manager,
     _mgr,

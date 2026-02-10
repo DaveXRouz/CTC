@@ -4,6 +4,29 @@ All notable changes to Conductor will be documented in this file.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2026-02-10
+
+Polish, documentation, and quality release.
+
+### Added
+
+- Comprehensive docstrings on all public functions and classes across 40 source files
+- README.md with project overview, setup guide, and full command reference
+- 9 new test files: brain, commands handlers, confirm integration, manager (full, logging, validation), monitor, natural, notifier
+- Test count increased from 195 to 476
+
+### Changed
+
+- UX polish across 60 message templates — emoji additions, copy rewrites for clarity
+- `.gitignore` hygiene — IDE state and worker artifacts excluded
+
+### Fixed
+
+- 36 lint issues resolved (unused imports, empty f-strings, unused variables)
+- All modules pass clean import verification
+
+---
+
 ## [1.0.0] - 2026-02-10
 
 First complete release. 40 build tasks, 195 tests, 96.14% coverage.

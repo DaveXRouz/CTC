@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 
 from aiogram import Router
 from aiogram.types import Message

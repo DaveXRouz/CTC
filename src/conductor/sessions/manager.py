@@ -6,7 +6,6 @@ import os
 import re
 import signal
 import uuid
-from pathlib import Path
 
 import libtmux
 

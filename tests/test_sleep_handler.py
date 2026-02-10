@@ -1,7 +1,6 @@
 """Tests for Mac sleep/wake detection handler."""
 
 import asyncio
-import pytest
 from unittest.mock import AsyncMock
 
 from conductor.utils.sleep_handler import SleepHandler

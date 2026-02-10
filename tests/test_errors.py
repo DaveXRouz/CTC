@@ -1,8 +1,7 @@
 """Tests for global error handler."""
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from conductor.utils.errors import ErrorHandler
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import os
 from datetime import datetime
 
 from aiogram import Router
@@ -434,7 +433,6 @@ async def cmd_run(message: Message) -> None:
 
 @router.message(Command("shell"))
 async def cmd_shell(message: Message) -> None:
-    mgr = _mgr()
     args = (message.text or "").split(maxsplit=1)
 
     if len(args) < 2:
@@ -652,7 +650,7 @@ async def cmd_quiet(message: Message) -> None:
         return
 
     await message.answer(
-        f"🌙 Quiet hours updated. Note: changes require daemon restart to take effect.\n"
+        "🌙 Quiet hours updated. Note: changes require daemon restart to take effect.\n"
         "Edit config.yaml to persist.",
     )
 

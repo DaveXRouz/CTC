@@ -7,7 +7,7 @@ import signal
 import sys
 
 from conductor.config import get_config, CONDUCTOR_HOME
-from conductor.utils.logger import setup_logging, get_logger
+from conductor.utils.logger import setup_logging
 from conductor.db.database import init_database, close_database
 from conductor.db.queries import seed_default_rules
 from conductor.sessions.manager import SessionManager
@@ -15,7 +15,7 @@ from conductor.sessions.monitor import OutputMonitor
 from conductor.sessions.recovery import recover_sessions
 from conductor.bot.bot import create_bot, set_app_data
 from conductor.bot.notifier import Notifier
-from conductor.bot.formatter import format_event, session_label
+from conductor.bot.formatter import format_event
 from conductor.bot.keyboards import (
     permission_keyboard,
     completion_keyboard,

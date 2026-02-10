@@ -6,7 +6,6 @@ import asyncio
 import os
 import uuid
 
-import libtmux
 
 from conductor.db.models import Session
 from conductor.db import queries

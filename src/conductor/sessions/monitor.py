@@ -10,7 +10,7 @@ import libtmux
 
 from conductor.config import get_config
 from conductor.sessions.output_buffer import OutputBuffer
-from conductor.sessions.detector import PatternDetector, DetectionResult
+from conductor.sessions.detector import PatternDetector
 from conductor.db.models import Session
 from conductor.utils.logger import get_logger
 
