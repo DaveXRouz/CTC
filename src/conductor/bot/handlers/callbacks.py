@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 
 from conductor.bot.formatter import session_label, format_status_dashboard
@@ -244,12 +245,15 @@ async def handle_status_refresh(callback: CallbackQuery) -> None:
         return
 
     sessions = await mgr.list_sessions()
-    await callback.message.edit_text(
-        format_status_dashboard(sessions),
-        parse_mode="HTML",
-        reply_markup=status_keyboard(),
-    )
-    await callback.answer("Refreshed!")
+    try:
+        await callback.message.edit_text(
+            format_status_dashboard(sessions),
+            parse_mode="HTML",
+            reply_markup=status_keyboard(),
+        )
+        await callback.answer("Refreshed!")
+    except TelegramBadRequest:
+        await callback.answer("Already up to date")
 
 
 # ── Suggestion callbacks ──

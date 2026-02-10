@@ -111,7 +111,14 @@ def format_status_dashboard(sessions: list[Session]) -> str:
         HTML string with header and one block per session, or a "no sessions" message.
     """
     if not sessions:
-        return "📊 <b>Conductor Status</b> — No active sessions\n\nUse /new to start a session."
+        return (
+            "📊 <b>Conductor Status</b> — No active sessions\n\n"
+            "Conductor tracks sessions it creates.\n"
+            "Your existing terminals aren't monitored.\n\n"
+            "Start one:\n"
+            "<code>/new cc ~/projects/myapp</code> — Claude Code\n"
+            "<code>/new sh ~/projects/myapp</code> — Shell"
+        )
 
     header = f"📊 <b>Conductor Status</b> — {len(sessions)} Active Session{'s' if len(sessions) != 1 else ''}\n"
     header += "─" * 35 + "\n\n"

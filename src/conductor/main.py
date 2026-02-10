@@ -32,6 +32,61 @@ from conductor.db.models import Event
 from conductor.db import queries as db_queries
 
 
+async def _setup_bot_profile(bot) -> None:
+    """Register command menu, description, and short description with Telegram.
+
+    Non-fatal — logs warnings on failure so startup isn't blocked.
+    """
+    from aiogram.types import BotCommand
+
+    commands = [
+        BotCommand(command="status", description="Session dashboard"),
+        BotCommand(command="new", description="Create session (cc|sh <dir>)"),
+        BotCommand(command="output", description="AI summary of output"),
+        BotCommand(command="tokens", description="Token usage overview"),
+        BotCommand(command="log", description="Full session log file"),
+        BotCommand(command="input", description="Send text to session"),
+        BotCommand(command="run", description="Run command in session"),
+        BotCommand(command="shell", description="One-off shell command"),
+        BotCommand(command="kill", description="Kill a session"),
+        BotCommand(command="restart", description="Restart a session"),
+        BotCommand(command="pause", description="Pause monitoring"),
+        BotCommand(command="resume", description="Resume monitoring"),
+        BotCommand(command="rename", description="Rename a session"),
+        BotCommand(command="auto", description="Auto-responder rules"),
+        BotCommand(command="quiet", description="Quiet hours settings"),
+        BotCommand(command="settings", description="View configuration"),
+        BotCommand(command="help", description="Command reference"),
+    ]
+    try:
+        await bot.set_my_commands(commands)
+    except Exception as e:
+        from conductor.utils.logger import get_logger
+
+        get_logger("conductor.main").warning(f"Failed to set bot commands: {e}")
+
+    try:
+        await bot.set_my_description(
+            "Conductor monitors and controls tmux terminal sessions from your phone. "
+            "Create sessions, relay prompts, auto-respond, and track token usage — all via Telegram."
+        )
+    except Exception as e:
+        from conductor.utils.logger import get_logger
+
+        get_logger("conductor.main").warning(f"Failed to set bot description: {e}")
+
+    try:
+        await bot.set_my_short_description(
+            "Remote terminal control — monitor sessions, relay prompts, track tokens."
+        )
+    except Exception as e:
+        from conductor.utils.logger import get_logger
+
+        get_logger("conductor.main").warning(
+            f"Failed to set bot short description: {e}"
+        )
+
+
 async def run() -> None:
     """Main async entry point -- initialize all subsystems and start polling.
 
@@ -83,6 +138,9 @@ async def run() -> None:
     # Create bot
     bot, dp = await create_bot()
     set_app_data("bot", bot)
+
+    # Register command menu + profile with Telegram
+    await _setup_bot_profile(bot)
 
     # Init notifier
     notifier = Notifier(bot, cfg.telegram_user_id)
@@ -333,7 +391,9 @@ async def run() -> None:
     logger.info("🚀 Conductor is online! Polling for Telegram messages...")
 
     try:
-        polling_task = asyncio.create_task(dp.start_polling(bot))
+        polling_task = asyncio.create_task(
+            dp.start_polling(bot, allowed_updates=["message", "callback_query"])
+        )
         connectivity_task = asyncio.create_task(notifier.connectivity_check())
         cleanup_task = asyncio.create_task(_cleanup_confirmations_loop())
         _track_task(cleanup_task)

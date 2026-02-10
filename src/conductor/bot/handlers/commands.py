@@ -18,6 +18,7 @@ from conductor.bot.formatter import (
 from conductor.bot.keyboards import (
     status_keyboard,
     confirm_keyboard,
+    main_menu_keyboard,
 )
 from conductor.security.redactor import redact_sensitive
 from conductor.sessions.manager import SessionManager
@@ -57,13 +58,14 @@ async def cmd_start(message: Message) -> None:
         "🎛️ <b>Conductor</b>\n\n"
         "Remote terminal control from Telegram.\n"
         "Monitor sessions, relay prompts, manage everything.\n\n"
+        "Conductor tracks sessions <b>it</b> creates — your existing\n"
+        "terminals aren't monitored until you start one here.\n\n"
         "<b>Quick start</b>\n"
-        "/new cc ~/projects/myapp\n"
-        "/new sh ~/projects/myapp\n"
-        "/status — view all sessions\n"
-        "/help — full reference\n\n"
-        'Or just type naturally: "what\'s happening in CountWize?"',
+        "<code>/new cc ~/projects/myapp</code> — Claude Code\n"
+        "<code>/new sh ~/projects/myapp</code> — Shell\n\n"
+        "Tap the buttons below or type /help for all commands.",
         parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
     )
 
 
@@ -93,6 +95,7 @@ async def cmd_help(message: Message) -> None:
         "/quiet HH:MM-HH:MM — quiet hours\n"
         "/settings — view config",
         parse_mode="HTML",
+        reply_markup=main_menu_keyboard(),
     )
 
 

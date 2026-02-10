@@ -13,12 +13,54 @@ logger = get_logger("conductor.bot.natural")
 
 router = Router()
 
+# Menu button text → command mapping
+_MENU_ROUTES = {
+    "status": "status",
+    "new session": "new_session",
+    "output": "output",
+    "tokens": "tokens",
+    "help": "help",
+}
+
+
+async def _dispatch_menu_command(message: Message, route: str) -> None:
+    """Dispatch a menu button tap to the appropriate command handler."""
+    if route == "status":
+        from conductor.bot.handlers.commands import cmd_status
+
+        await cmd_status(message)
+    elif route == "output":
+        from conductor.bot.handlers.commands import cmd_output
+
+        await cmd_output(message)
+    elif route == "tokens":
+        from conductor.bot.handlers.commands import cmd_tokens
+
+        await cmd_tokens(message)
+    elif route == "help":
+        from conductor.bot.handlers.commands import cmd_help
+
+        await cmd_help(message)
+    elif route == "new_session":
+        from conductor.bot.keyboards import main_menu_keyboard
+
+        await message.answer(
+            "📦 <b>Create a Session</b>\n\n"
+            "Usage: /new &lt;type&gt; &lt;directory&gt;\n\n"
+            "<b>Examples:</b>\n"
+            "<code>/new cc ~/projects/myapp</code> — Claude Code\n"
+            "<code>/new sh ~/projects/myapp</code> — Shell\n",
+            parse_mode="HTML",
+            reply_markup=main_menu_keyboard(),
+        )
+
 
 @router.message()
 async def handle_natural_language(message: Message) -> None:
     """Handle non-command messages via NLP parsing.
 
     Processing order:
+    0. Menu button taps (Status, Output, etc.)
     1. Quick prompt responses (short text -> last active session)
     2. AI NLP parsing via brain.parse_nlp()
     3. Single-session fallback (send text to the only active session)
@@ -29,6 +71,12 @@ async def handle_natural_language(message: Message) -> None:
     """
     text = (message.text or "").strip()
     if not text or text.startswith("/"):
+        return
+
+    # Menu button routing — check before anything else
+    route = _MENU_ROUTES.get(text.lower())
+    if route:
+        await _dispatch_menu_command(message, route)
         return
 
     from conductor.bot.bot import get_app_data

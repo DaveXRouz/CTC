@@ -114,7 +114,7 @@ class TestStartHelp:
         msg.answer.assert_awaited_once()
         text = msg.answer.call_args[0][0]
         assert "Conductor" in text
-        assert "/status" in text
+        assert "/help" in text
 
     async def test_cmd_help_sends_reference(self):
         msg = _make_message("/help")

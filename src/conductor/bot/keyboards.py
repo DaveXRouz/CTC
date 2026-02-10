@@ -2,7 +2,29 @@
 
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+)
+
+
+def main_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Build persistent reply keyboard for quick phone access.
+
+    Returns:
+        ReplyKeyboardMarkup with Status, New Session, Output, Tokens, Help buttons.
+    """
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Status"), KeyboardButton(text="New Session")],
+            [KeyboardButton(text="Output"), KeyboardButton(text="Tokens")],
+            [KeyboardButton(text="Help")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 
 def permission_keyboard(session_id: str) -> InlineKeyboardMarkup:

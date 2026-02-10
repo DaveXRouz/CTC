@@ -1,6 +1,9 @@
-"""Tests for inline keyboard builders."""
+"""Tests for keyboard builders."""
+
+from aiogram.types import ReplyKeyboardMarkup
 
 from conductor.bot.keyboards import (
+    main_menu_keyboard,
     permission_keyboard,
     completion_keyboard,
     rate_limit_keyboard,
@@ -10,6 +13,25 @@ from conductor.bot.keyboards import (
     session_picker,
     suggestion_keyboard,
 )
+
+
+class TestMainMenuKeyboard:
+    def test_returns_reply_keyboard(self):
+        kb = main_menu_keyboard()
+        assert isinstance(kb, ReplyKeyboardMarkup)
+
+    def test_resize_and_persistent(self):
+        kb = main_menu_keyboard()
+        assert kb.resize_keyboard is True
+        assert kb.is_persistent is True
+
+    def test_layout(self):
+        kb = main_menu_keyboard()
+        rows = kb.keyboard
+        assert len(rows) == 3
+        assert [b.text for b in rows[0]] == ["Status", "New Session"]
+        assert [b.text for b in rows[1]] == ["Output", "Tokens"]
+        assert [b.text for b in rows[2]] == ["Help"]
 
 
 class TestKeyboards:
