@@ -223,9 +223,7 @@ async def handle_completion(callback: CallbackQuery) -> None:
             f"▶️ Running tests in {session_label(session)}"
         )
     elif action == "log":
-        from conductor.bot.handlers.commands import cmd_log
-
-        await cmd_log(callback.message)
+        await callback.message.answer("📋 Use /log to view the full session log.")
     elif action == "new":
         await callback.message.answer(
             "⏭️ Type your next task instruction and I'll send it to the session."
