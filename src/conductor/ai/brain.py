@@ -23,6 +23,8 @@ class AIBrain:
         self._client = anthropic.AsyncAnthropic(api_key=cfg.anthropic_api_key)
         self._model = cfg.ai_model
         self._timeout = cfg.ai_timeout
+        self._last_call_time: dict[str, float] = {}
+        self._min_interval: float = 10.0
 
     async def _call(self, prompt: str, max_tokens: int = 200) -> str:
         """Make an API call to Claude Haiku with timeout.
@@ -57,6 +59,17 @@ class AIBrain:
             logger.warning(f"Haiku API error: {e}")
             raise
 
+    def _rate_ok(self, key: str) -> bool:
+        """Check if enough time has elapsed since the last call for this key."""
+        import time
+
+        now = time.monotonic()
+        last = self._last_call_time.get(key, 0)
+        if (now - last) < self._min_interval:
+            return False
+        self._last_call_time[key] = now
+        return True
+
     async def summarize(self, terminal_output: str) -> str:
         """Summarize terminal output into 2-4 sentences.
 
@@ -68,6 +81,8 @@ class AIBrain:
         Returns:
             AI-generated summary, or raw fallback text on failure.
         """
+        if not self._rate_ok("summarize"):
+            return get_raw_fallback(terminal_output)
         cfg = get_config()
         prompt = SUMMARIZE_PROMPT.format(terminal_output=terminal_output[-3000:])
         try:
@@ -96,6 +111,8 @@ class AIBrain:
             List of dicts with ``'label'`` and ``'command'`` keys, or empty
             list on failure.
         """
+        if not self._rate_ok("suggest"):
+            return []
         cfg = get_config()
         prompt = SUGGEST_PROMPT.format(
             terminal_output=terminal_output[-2000:],

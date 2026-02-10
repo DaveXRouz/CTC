@@ -443,6 +443,22 @@ async def cmd_shell(message: Message) -> None:
         return
 
     cmd = args[1]
+
+    # M8: Block dangerous shell commands
+    _dangerous_commands = [
+        "rm -rf /",
+        "rm -rf /*",
+        "mkfs",
+        "dd if=",
+        ":(){",
+        "fork bomb",
+    ]
+    cmd_lower = cmd.lower().strip()
+    for dangerous in _dangerous_commands:
+        if dangerous in cmd_lower:
+            await message.answer(f"🚫 Blocked: destructive command detected.")
+            return
+
     try:
         import asyncio
 

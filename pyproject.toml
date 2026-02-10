@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=68.0", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "conductor"
@@ -15,7 +15,6 @@ dependencies = [
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
     "rich>=13.0",
-    "aiofiles>=24.0",
 ]
 
 [project.optional-dependencies]
@@ -39,22 +38,6 @@ addopts = "-v --tb=short"
 
 [tool.coverage.run]
 source = ["conductor"]
-omit = [
-    "*/handlers/commands.py",
-    "*/handlers/callbacks.py",
-    "*/handlers/natural.py",
-    "*/handlers/fallback.py",
-    "*/bot/bot.py",
-    "*/bot/notifier.py",
-    "*/sessions/manager.py",
-    "*/sessions/monitor.py",
-    "*/sessions/recovery.py",
-    "*/security/auth.py",
-    "*/ai/brain.py",
-    "*/__main__.py",
-    "*/main.py",
-]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 80

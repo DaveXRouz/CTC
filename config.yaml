@@ -10,7 +10,7 @@ sessions:
 
 # ── Token tracking ──
 tokens:
-  plan_tier: "pro"
+  plan_tier: "max_20x"
   warning_pct: 80
   danger_pct: 90
   critical_pct: 95

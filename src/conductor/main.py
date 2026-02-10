@@ -380,6 +380,28 @@ async def run() -> None:
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
+    # M5: Periodic health check — detect dead session PIDs
+    async def _health_check_loop():
+        import os
+
+        def is_pid_alive(pid: int) -> bool:
+            try:
+                os.kill(pid, 0)
+                return True
+            except (OSError, ProcessLookupError):
+                return False
+
+        while True:
+            await asyncio.sleep(60)
+            for sid in list(monitors.keys()):
+                session = session_manager.get_session(sid)
+                if session and session.pid and not is_pid_alive(session.pid):
+                    logger.warning(
+                        f"Session {session.alias} (PID {session.pid}) is dead — marking exited"
+                    )
+                    await db_queries.update_session(sid, status="exited")
+                    session.status = "exited"
+
     # C9: Periodic cleanup of expired confirmations
     async def _cleanup_confirmations_loop():
         while True:
@@ -396,7 +418,9 @@ async def run() -> None:
         )
         connectivity_task = asyncio.create_task(notifier.connectivity_check())
         cleanup_task = asyncio.create_task(_cleanup_confirmations_loop())
+        health_task = asyncio.create_task(_health_check_loop())
         _track_task(cleanup_task)
+        _track_task(health_task)
 
         await shutdown_event.wait()
 
@@ -407,6 +431,7 @@ async def run() -> None:
         await sleep_handler.stop()
         await error_handler.stop()
         cleanup_task.cancel()
+        health_task.cancel()
         for m in monitors.values():
             await m.stop()
         for task in monitor_tasks.values():

@@ -17,10 +17,10 @@ class TestAutoResponder:
         assert result.response == "n"
 
     def test_auto_responds_to_enter(self):
-        # "Press Enter to continue" matches permission prompt patterns by spec design
-        # so we test that it is correctly blocked as a permission prompt
+        # "Press Enter to continue" matches an auto-responder rule (response="")
         result = responder.check("Press Enter to continue...")
-        assert result.should_respond is False
+        assert result.should_respond is True
+        assert result.response == ""
 
     def test_overwrite_blocked_as_destructive(self):
         result = responder.check("Overwrite config? (y/N)")

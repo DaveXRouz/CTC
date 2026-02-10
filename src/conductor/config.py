@@ -154,6 +154,11 @@ class Config:
     def confirmation_timeout_s(self) -> int:
         return self.notifications_config.get("confirmation_timeout_s", 30)
 
+    def reload(self) -> None:
+        """Force-reload configuration from .env and config.yaml."""
+        self._loaded = False
+        self.load()
+
 
 def get_config() -> Config:
     """Get the singleton config, loading it if needed.

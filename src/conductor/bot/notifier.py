@@ -107,27 +107,33 @@ class Notifier:
         return await self._send_direct(text, kwargs)
 
     async def _send_direct(self, text: str, kwargs: dict) -> int | None:
-        """Attempt direct send to Telegram; queue message if offline.
-
-        Args:
-            text: Message text.
-            kwargs: Additional send_message keyword arguments.
-
-        Returns:
-            Message ID on success, or None if send failed (message queued).
-        """
-        try:
-            msg = await self.bot.send_message(self.chat_id, text, **kwargs)
-            self.is_online = True
-            await self._flush_offline_queue()
-            return msg.message_id
-        except Exception as e:
-            self.is_online = False
-            await self._queue.put((text, kwargs, 1))
-            logger.warning(
-                f"Queued notification (offline): {e}. Queue: {self._queue.qsize()}"
-            )
-            return None
+        """Attempt direct send to Telegram with 429 backoff; queue if offline."""
+        backoff = 1.0
+        max_backoff = 30.0
+        for attempt in range(4):
+            try:
+                msg = await self.bot.send_message(self.chat_id, text, **kwargs)
+                self.is_online = True
+                await self._flush_offline_queue()
+                return msg.message_id
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "Too Many Requests" in err_str:
+                    logger.warning(
+                        f"Telegram 429 — backoff {backoff}s (attempt {attempt + 1})"
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, max_backoff)
+                    continue
+                self.is_online = False
+                await self._queue.put((text, kwargs, 1))
+                logger.warning(
+                    f"Queued notification (offline): {e}. Queue: {self._queue.qsize()}"
+                )
+                return None
+        # All retries exhausted
+        await self._queue.put((text, kwargs, 1))
+        return None
 
     async def _batch_loop(self) -> None:
         """Background loop that flushes the batch buffer at regular intervals."""

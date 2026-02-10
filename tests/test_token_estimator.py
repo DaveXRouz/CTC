@@ -27,26 +27,30 @@ class TestTokenEstimator:
 
     def test_percentage_calculation(self):
         est = TokenEstimator()
-        for _ in range(36):
+        # With max_20x tier, limit=900. 720/900 = 80%
+        for _ in range(720):
             est.on_claude_response("s1")
         usage = est.get_usage("s1")
-        assert usage["percentage"] == 80  # 36/45 = 80%
+        assert usage["percentage"] == 80
 
     def test_threshold_warning(self):
         est = TokenEstimator()
-        for _ in range(36):
+        # 80% of 900 = 720
+        for _ in range(720):
             est.on_claude_response("s1")
         assert est.check_thresholds() == "warning"
 
     def test_threshold_danger(self):
         est = TokenEstimator()
-        for _ in range(41):
+        # 90% of 900 = 810
+        for _ in range(810):
             est.on_claude_response("s1")
         assert est.check_thresholds() == "danger"
 
     def test_threshold_critical(self):
         est = TokenEstimator()
-        for _ in range(43):
+        # 95% of 900 = 855
+        for _ in range(855):
             est.on_claude_response("s1")
         assert est.check_thresholds() == "critical"
 

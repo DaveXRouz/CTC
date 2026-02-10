@@ -90,6 +90,23 @@ async def handle_natural_language(message: Message) -> None:
         await message.answer("⏳ Bot is still initializing. Try again shortly.")
         return
 
+    # Check if a session was picked via inline keyboard (one-time use)
+    picked_session = app_data.get("picked_session")
+    if picked_session:
+        from conductor.bot.bot import set_app_data
+
+        set_app_data("picked_session", None)
+        session = mgr.get_session(picked_session)
+        if session:
+            from conductor.bot.formatter import session_label
+
+            mgr.send_input(session.id, text)
+            await message.answer(
+                f"📤 Sent to {session_label(session)}: <code>{text}</code>",
+                parse_mode="HTML",
+            )
+            return
+
     # Quick check: if only one session and text looks like a response (short, y/n, number)
     sessions = await mgr.list_sessions()
     last_prompt_session = app_data.get("last_prompt_session")
@@ -171,7 +188,7 @@ async def _dispatch_nlp_command(message: Message, result: dict, mgr) -> None:
         from conductor.bot.handlers.commands import cmd_status
 
         if session_ref:
-            message.text = f"/status {session_ref}"
+            message.__dict__["text"] = f"/status {session_ref}"
         await cmd_status(message)
     elif command == "input":
         text = args.get("text", "")
@@ -189,7 +206,7 @@ async def _dispatch_nlp_command(message: Message, result: dict, mgr) -> None:
         from conductor.bot.handlers.commands import cmd_output
 
         if session_ref:
-            message.text = f"/output {session_ref}"
+            message.__dict__["text"] = f"/output {session_ref}"
         await cmd_output(message)
     elif command == "tokens":
         from conductor.bot.handlers.commands import cmd_tokens
@@ -203,19 +220,19 @@ async def _dispatch_nlp_command(message: Message, result: dict, mgr) -> None:
         if session_ref:
             from conductor.bot.handlers.commands import cmd_kill
 
-            message.text = f"/kill {session_ref}"
+            message.__dict__["text"] = f"/kill {session_ref}"
             await cmd_kill(message)
     elif command == "pause":
         if session_ref:
             from conductor.bot.handlers.commands import cmd_pause
 
-            message.text = f"/pause {session_ref}"
+            message.__dict__["text"] = f"/pause {session_ref}"
             await cmd_pause(message)
     elif command == "resume":
         if session_ref:
             from conductor.bot.handlers.commands import cmd_resume
 
-            message.text = f"/resume {session_ref}"
+            message.__dict__["text"] = f"/resume {session_ref}"
             await cmd_resume(message)
     elif command == "digest":
         from conductor.bot.handlers.commands import cmd_digest

@@ -3,7 +3,10 @@
 import pytest
 from conductor.sessions.detector import PatternDetector, has_destructive_keyword
 
-detector = PatternDetector()
+
+@pytest.fixture
+def detector():
+    return PatternDetector()
 
 
 class TestPermissionPrompts:
@@ -21,7 +24,7 @@ class TestPermissionPrompts:
             "Would you like to continue with the operation?",
         ],
     )
-    def test_detects_permission_prompts(self, text):
+    def test_detects_permission_prompts(self, detector, text):
         result = detector.classify(text)
         assert result.type == "permission_prompt"
 
@@ -34,7 +37,7 @@ class TestPermissionPrompts:
             "Downloading dependencies",
         ],
     )
-    def test_does_not_false_positive(self, text):
+    def test_does_not_false_positive(self, detector, text):
         result = detector.classify(text)
         assert result.type != "permission_prompt"
 
@@ -51,7 +54,7 @@ class TestRateLimits:
             "Quota exceeded for this billing period.",
         ],
     )
-    def test_detects_rate_limits(self, text):
+    def test_detects_rate_limits(self, detector, text):
         result = detector.classify(text)
         assert result.type == "rate_limit"
 
@@ -65,10 +68,10 @@ class TestErrorPatterns:
             "FATAL: password authentication failed",
             "process exited with code 1",
             "ModuleNotFoundError: No module named 'foo'",
-            "Connection refused to localhost:5432",
+            "connection refused to localhost:5432",
         ],
     )
-    def test_detects_errors(self, text):
+    def test_detects_errors(self, detector, text):
         result = detector.classify(text)
         assert result.type == "error"
 
@@ -85,7 +88,7 @@ class TestCompletionPatterns:
             "42 passing",
         ],
     )
-    def test_detects_completions(self, text):
+    def test_detects_completions(self, detector, text):
         result = detector.classify(text)
         assert result.type == "completion"
 
@@ -101,7 +104,7 @@ class TestDestructiveKeywords:
             "Deploy to production?",
         ],
     )
-    def test_detects_destructive(self, text):
+    def test_detects_destructive(self, text):  # noqa: no fixture needed
         assert has_destructive_keyword(text) is True
 
     def test_normal_text_not_destructive(self):

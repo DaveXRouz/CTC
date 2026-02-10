@@ -73,27 +73,53 @@ CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type, acknowledged);
 _db: aiosqlite.Connection | None = None
 _db_lock = asyncio.Lock()
 
+SCHEMA_VERSION = 1
+MIGRATIONS: dict[int, str] = {}
+
+
+async def _get_schema_version(db: aiosqlite.Connection) -> int:
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL DEFAULT 1)"
+    )
+    async with db.execute("SELECT version FROM schema_version") as cur:
+        row = await cur.fetchone()
+        if row is None:
+            await db.execute(
+                "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
+            )
+            await db.commit()
+            return SCHEMA_VERSION
+        return row[0] if isinstance(row, tuple) else row["version"]
+
+
+async def _run_migrations(db: aiosqlite.Connection) -> None:
+    current = await _get_schema_version(db)
+    for ver in sorted(MIGRATIONS.keys()):
+        if ver > current:
+            sql = MIGRATIONS[ver]
+            if isinstance(sql, str):
+                await db.execute(sql)
+            elif callable(sql):
+                await sql(db)
+            await db.execute("UPDATE schema_version SET version = ?", (ver,))
+            await db.commit()
+
 
 async def init_database(db_path: str | None = None) -> aiosqlite.Connection:
-    """Initialize SQLite with WAL mode and create tables.
-
-    Args:
-        db_path: Override path for the database file. Defaults to
-            ``~/.conductor/conductor.db``.
-
-    Returns:
-        The opened ``aiosqlite.Connection`` with WAL mode enabled.
-    """
+    """Initialize SQLite with WAL mode and create tables."""
     global _db
     path = db_path or str(DB_PATH)
     logger.info(f"Initializing database at {path}")
 
     db = await aiosqlite.connect(path)
+    db.row_factory = aiosqlite.Row
     await db.execute("PRAGMA journal_mode=WAL")
     await db.execute("PRAGMA busy_timeout=5000")
     await db.execute("PRAGMA synchronous=NORMAL")
     await db.executescript(SCHEMA)
     await db.commit()
+
+    await _run_migrations(db)
 
     _db = db
     logger.info("Database initialized successfully")
@@ -101,11 +127,7 @@ async def init_database(db_path: str | None = None) -> aiosqlite.Connection:
 
 
 async def get_db() -> aiosqlite.Connection:
-    """Get the database connection, initializing if needed.
-
-    Returns:
-        The shared ``aiosqlite.Connection`` singleton.
-    """
+    """Get the database connection, initializing if needed."""
     global _db
     if _db is not None:
         return _db

@@ -21,9 +21,9 @@ confirmation_mgr = ConfirmationManager()
 
 
 def _get_mgr():
-    from conductor.bot.handlers.commands import _session_manager
+    from conductor.bot.bot import get_app_data
 
-    return _session_manager
+    return get_app_data().get("session_manager")
 
 
 # ── Confirmation callbacks ──

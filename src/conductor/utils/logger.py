@@ -17,6 +17,7 @@ def setup_logging(
     max_bytes: int = 50 * 1024 * 1024,
     backup_count: int = 3,
     console: bool = True,
+    force: bool = False,
 ) -> logging.Logger:
     """Configure the conductor logger with Rich console + rotating file handler.
 
@@ -31,6 +32,8 @@ def setup_logging(
         The configured ``'conductor'`` root logger.
     """
     global _configured
+    if force:
+        _configured = False
     if _configured:
         return logging.getLogger("conductor")
 
