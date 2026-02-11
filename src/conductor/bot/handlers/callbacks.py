@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import secrets
+import time
+from dataclasses import dataclass, field
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
@@ -23,6 +27,7 @@ from conductor.bot.keyboards import (
     action_session_picker,
     new_session_keyboard,
     directory_picker,
+    browse_keyboard,
     auto_responder_keyboard,
     back_keyboard,
     confirm_keyboard,
@@ -32,6 +37,23 @@ from conductor.security.redactor import redact_sensitive
 from conductor.utils.logger import get_logger
 
 logger = get_logger("conductor.bot.callbacks")
+
+
+@dataclass
+class BrowseState:
+    """State for the Finder-style directory browser."""
+
+    user_id: int
+    generation: str  # 4-char hex
+    current_path: str  # absolute path
+    subdirs: list[str] = field(default_factory=list)
+    session_type: str = "claude-code"
+    created_at: float = field(default_factory=time.time)
+
+    @property
+    def expired(self) -> bool:
+        return time.time() - self.created_at > 300  # 5-min TTL
+
 
 router = Router()
 
@@ -364,6 +386,32 @@ def _clear_pending_input():
     set_app_data("pending_input_session", None)
     set_app_data("pending_new_session_type", None)
     set_app_data("pending_dir_choices", None)
+    set_app_data("browse_state", None)
+
+
+def _list_subdirs(path: str, max_items: int = 8) -> list[str]:
+    """List visible subdirectories of *path*, sorted case-insensitively.
+
+    Skips hidden dirs (starting with '.') and caps at *max_items*.
+    """
+    try:
+        entries = [
+            e.name
+            for e in os.scandir(path)
+            if e.is_dir() and not e.name.startswith(".")
+        ]
+    except OSError:
+        return []
+    entries.sort(key=str.casefold)
+    return entries[:max_items]
+
+
+def _shorten_path(path: str) -> str:
+    """Replace the home directory prefix with ``~`` for display."""
+    home = os.path.expanduser("~")
+    if path.startswith(home):
+        return "~" + path[len(home) :]
+    return path
 
 
 def _dir_display_label(path: str) -> str:
@@ -403,7 +451,7 @@ async def _build_directory_choices() -> list[tuple[int, str, str]]:
     recent = await get_recent_working_dirs(limit=5)
     for path in recent:
         normalized = os.path.expanduser(path)
-        if normalized not in seen:
+        if normalized not in seen and os.path.isdir(normalized):
             seen.add(normalized)
             choices.append((path, _dir_display_label(path)))
 
@@ -411,14 +459,14 @@ async def _build_directory_choices() -> list[tuple[int, str, str]]:
     default = cfg.default_dir
     if default:
         normalized = os.path.expanduser(default)
-        if normalized not in seen:
+        if normalized not in seen and os.path.isdir(normalized):
             seen.add(normalized)
             choices.append((default, _dir_display_label(default)))
 
     # Config aliases
     for alias_name, alias_path in cfg.aliases.items():
         normalized = os.path.expanduser(alias_path)
-        if normalized not in seen:
+        if normalized not in seen and os.path.isdir(normalized):
             seen.add(normalized)
             choices.append((alias_path, alias_name))
 
@@ -748,6 +796,35 @@ async def handle_directory_pick(callback: CallbackQuery) -> None:
     app_data = get_app_data()
     session_type = app_data.get("pending_new_session_type", "claude-code")
 
+    if choice == "browse":
+        # Open Finder-style browser
+        from conductor.config import get_config
+
+        cfg = get_config()
+        start = os.path.expanduser(cfg.default_dir or "~")
+        if not os.path.isdir(start):
+            start = os.path.expanduser("~")
+        gen = secrets.token_hex(2)
+        subdirs = _list_subdirs(start)
+        state = BrowseState(
+            user_id=callback.from_user.id,
+            generation=gen,
+            current_path=start,
+            subdirs=subdirs,
+            session_type=session_type,
+        )
+        set_app_data("browse_state", state)
+        try:
+            await callback.message.edit_text(
+                f"\U0001f4c2 <b>Browse:</b> {mono(_shorten_path(start))}",
+                parse_mode="HTML",
+                reply_markup=browse_keyboard(subdirs, gen, can_go_up=start != "/"),
+            )
+        except TelegramBadRequest:
+            pass
+        await callback.answer()
+        return
+
     if choice == "custom":
         # Fall back to text input
         set_app_data("pending_input_type", "new_session")
@@ -814,6 +891,147 @@ async def handle_directory_pick(callback: CallbackQuery) -> None:
         except TelegramBadRequest:
             pass
 
+    await callback.answer()
+
+
+# ── Browse directory callbacks ──
+
+
+@router.callback_query(F.data.startswith("br:"))
+async def handle_browse(callback: CallbackQuery) -> None:
+    """Handle Finder-style directory browser navigation."""
+    parts = callback.data.split(":")
+    if len(parts) < 3:
+        await callback.answer("Invalid callback")
+        return
+
+    generation = parts[1]
+    action = parts[2]
+
+    from conductor.bot.bot import get_app_data, set_app_data
+
+    state: BrowseState | None = get_app_data().get("browse_state")
+
+    # Validate state exists and generation matches
+    if (
+        not state
+        or state.generation != generation
+        or state.user_id != callback.from_user.id
+        or state.expired
+    ):
+        try:
+            await callback.message.edit_text(
+                "\u23f0 Browser session expired. Please start again.",
+                reply_markup=back_keyboard("menu:new"),
+            )
+        except TelegramBadRequest:
+            pass
+        await callback.answer()
+        return
+
+    if action == "noop":
+        await callback.answer()
+        return
+
+    if action == "cancel":
+        set_app_data("browse_state", None)
+        try:
+            await callback.message.edit_text(
+                "\u2795 <b>New Session</b>\n\nPick session type:",
+                parse_mode="HTML",
+                reply_markup=new_session_keyboard(),
+            )
+        except TelegramBadRequest:
+            pass
+        await callback.answer()
+        return
+
+    if action == "up":
+        parent = os.path.dirname(state.current_path)
+        if parent == state.current_path:
+            # Already at root
+            await callback.answer("Already at root")
+            return
+        subdirs = _list_subdirs(parent)
+        state.current_path = parent
+        state.subdirs = subdirs
+        try:
+            await callback.message.edit_text(
+                f"\U0001f4c2 <b>Browse:</b> {mono(_shorten_path(parent))}",
+                parse_mode="HTML",
+                reply_markup=browse_keyboard(
+                    subdirs, generation, can_go_up=parent != "/"
+                ),
+            )
+        except TelegramBadRequest:
+            pass
+        await callback.answer()
+        return
+
+    if action == "sel":
+        # Select current directory — create session
+        working_dir = state.current_path
+        session_type = state.session_type
+        set_app_data("browse_state", None)
+        set_app_data("pending_new_session_type", None)
+
+        mgr = _get_mgr()
+        if not mgr:
+            await callback.answer("Session manager unavailable")
+            return
+
+        try:
+            app_data = get_app_data()
+            session = await mgr.create_session(
+                session_type=session_type, working_dir=working_dir
+            )
+            from conductor.bot.handlers.natural import _start_monitor_for_session
+
+            _start_monitor_for_session(session, mgr, app_data)
+
+            await callback.message.edit_text(
+                f"\u2705 Created {session_label(session)} (#{session.number})\n"
+                f"Type: {session.type}\n"
+                f"Dir: {mono(_shorten_path(session.working_dir))}",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            try:
+                await callback.message.edit_text(
+                    f"\u274c Failed to create session: {e}"
+                )
+            except TelegramBadRequest:
+                pass
+
+        await callback.answer()
+        return
+
+    # Numeric index — navigate into subdirectory
+    try:
+        idx = int(action)
+        if idx < 0 or idx >= len(state.subdirs):
+            raise IndexError
+        subdir_name = state.subdirs[idx]
+    except (ValueError, IndexError):
+        await callback.answer("Invalid selection")
+        return
+
+    new_path = os.path.join(state.current_path, subdir_name)
+    if not os.path.isdir(new_path):
+        await callback.answer("Directory no longer exists")
+        return
+
+    subdirs = _list_subdirs(new_path)
+    state.current_path = new_path
+    state.subdirs = subdirs
+    try:
+        await callback.message.edit_text(
+            f"\U0001f4c2 <b>Browse:</b> {mono(_shorten_path(new_path))}",
+            parse_mode="HTML",
+            reply_markup=browse_keyboard(subdirs, generation, can_go_up=True),
+        )
+    except TelegramBadRequest:
+        pass
     await callback.answer()
 
 

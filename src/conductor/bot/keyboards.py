@@ -421,6 +421,9 @@ def directory_picker(
         for idx, label in directories
     ]
     buttons.append(
+        [InlineKeyboardButton(text="\U0001f50d Browse...", callback_data="dir:browse")]
+    )
+    buttons.append(
         [
             InlineKeyboardButton(
                 text="\U0001f4dd Custom path...", callback_data="dir:custom"
@@ -430,6 +433,76 @@ def directory_picker(
     buttons.append(
         [InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data="menu:new")]
     )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def browse_keyboard(
+    subdirs: list[str],
+    generation: str,
+    can_go_up: bool = True,
+) -> InlineKeyboardMarkup:
+    """Build Finder-style directory browser keyboard.
+
+    Args:
+        subdirs: Subdirectory names to display (max 8).
+        generation: 4-char hex generation token for stale-button invalidation.
+        can_go_up: Whether to show the "Parent Directory" button.
+
+    Returns:
+        InlineKeyboardMarkup with subdir buttons, parent, select, and cancel.
+    """
+    buttons: list[list[InlineKeyboardButton]] = []
+
+    if subdirs:
+        # 2 per row, max 8 items (4 rows)
+        for i in range(0, len(subdirs[:8]), 2):
+            row = [
+                InlineKeyboardButton(
+                    text=f"\U0001f4c1 {subdirs[i]}",
+                    callback_data=f"br:{generation}:{i}",
+                )
+            ]
+            if i + 1 < len(subdirs[:8]):
+                row.append(
+                    InlineKeyboardButton(
+                        text=f"\U0001f4c1 {subdirs[i + 1]}",
+                        callback_data=f"br:{generation}:{i + 1}",
+                    )
+                )
+            buttons.append(row)
+    else:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text="(no subdirectories)",
+                    callback_data=f"br:{generation}:noop",
+                )
+            ]
+        )
+
+    if can_go_up:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text="\u2b06\ufe0f Parent Directory",
+                    callback_data=f"br:{generation}:up",
+                )
+            ]
+        )
+
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                text="\u2705 Select This Folder",
+                callback_data=f"br:{generation}:sel",
+            ),
+            InlineKeyboardButton(
+                text="\u274c Cancel",
+                callback_data=f"br:{generation}:cancel",
+            ),
+        ]
+    )
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 

@@ -19,6 +19,7 @@ from conductor.bot.keyboards import (
     action_session_picker,
     new_session_keyboard,
     directory_picker,
+    browse_keyboard,
     auto_responder_keyboard,
     back_keyboard,
 )
@@ -348,8 +349,8 @@ class TestDirectoryPicker:
         dirs = [(0, "myapp"), (1, "api"), (2, "frontend")]
         kb = directory_picker(dirs)
         rows = kb.inline_keyboard
-        # 3 dir buttons + Custom + Back = 5
-        assert len(rows) == 5
+        # 3 dir buttons + Browse + Custom + Back = 6
+        assert len(rows) == 6
 
     def test_callback_data_format(self):
         dirs = [(0, "myapp"), (1, "api")]
@@ -364,6 +365,14 @@ class TestDirectoryPicker:
         rows = kb.inline_keyboard
         assert "myapp" in rows[0][0].text
         assert "api" in rows[1][0].text
+
+    def test_browse_button(self):
+        dirs = [(0, "myapp")]
+        kb = directory_picker(dirs)
+        rows = kb.inline_keyboard
+        browse_row = rows[-3]  # Third to last row
+        assert browse_row[0].callback_data == "dir:browse"
+        assert "Browse" in browse_row[0].text
 
     def test_custom_path_button(self):
         dirs = [(0, "myapp")]
@@ -384,7 +393,76 @@ class TestDirectoryPicker:
     def test_empty_dirs(self):
         kb = directory_picker([])
         rows = kb.inline_keyboard
-        # Only Custom + Back = 2
-        assert len(rows) == 2
-        assert rows[0][0].callback_data == "dir:custom"
-        assert rows[1][0].callback_data == "menu:new"
+        # Only Browse + Custom + Back = 3
+        assert len(rows) == 3
+        assert rows[0][0].callback_data == "dir:browse"
+        assert rows[1][0].callback_data == "dir:custom"
+        assert rows[2][0].callback_data == "menu:new"
+
+
+class TestBrowseKeyboard:
+    def test_subdirs_layout_2_per_row(self):
+        kb = browse_keyboard(["dir1", "dir2", "dir3", "dir4"], "a1b2")
+        rows = kb.inline_keyboard
+        # 2 subdir rows + parent + action row = 4
+        assert len(rows) == 4
+        assert len(rows[0]) == 2  # dir1, dir2
+        assert len(rows[1]) == 2  # dir3, dir4
+
+    def test_odd_subdirs(self):
+        kb = browse_keyboard(["dir1", "dir2", "dir3"], "a1b2")
+        rows = kb.inline_keyboard
+        # 2 subdir rows (2+1) + parent + action = 4
+        assert len(rows) == 4
+        assert len(rows[0]) == 2
+        assert len(rows[1]) == 1  # dir3 alone
+
+    def test_callback_data_format(self):
+        kb = browse_keyboard(["alpha", "beta"], "f00d")
+        rows = kb.inline_keyboard
+        assert rows[0][0].callback_data == "br:f00d:0"
+        assert rows[0][1].callback_data == "br:f00d:1"
+
+    def test_parent_button(self):
+        kb = browse_keyboard(["sub"], "abcd", can_go_up=True)
+        rows = kb.inline_keyboard
+        parent_row = rows[-2]  # Before action row
+        assert parent_row[0].callback_data == "br:abcd:up"
+        assert "Parent" in parent_row[0].text
+
+    def test_no_parent_when_disabled(self):
+        kb = browse_keyboard(["sub"], "abcd", can_go_up=False)
+        rows = kb.inline_keyboard
+        all_data = [btn.callback_data for row in rows for btn in row]
+        assert "br:abcd:up" not in all_data
+
+    def test_select_and_cancel_buttons(self):
+        kb = browse_keyboard(["sub"], "abcd")
+        rows = kb.inline_keyboard
+        action_row = rows[-1]
+        assert action_row[0].callback_data == "br:abcd:sel"
+        assert action_row[1].callback_data == "br:abcd:cancel"
+        assert "Select" in action_row[0].text
+        assert "Cancel" in action_row[1].text
+
+    def test_empty_subdirs_placeholder(self):
+        kb = browse_keyboard([], "abcd")
+        rows = kb.inline_keyboard
+        assert rows[0][0].callback_data == "br:abcd:noop"
+        assert "no subdirectories" in rows[0][0].text
+
+    def test_max_8_subdirs(self):
+        dirs = [f"d{i}" for i in range(12)]
+        kb = browse_keyboard(dirs, "abcd")
+        rows = kb.inline_keyboard
+        # 4 subdir rows (8 items / 2) + parent + action = 6
+        assert len(rows) == 6
+        # Count subdir buttons
+        subdir_buttons = [
+            btn
+            for row in rows[:-2]
+            for btn in row
+            if btn.callback_data.startswith("br:abcd:")
+            and btn.callback_data.split(":")[-1].isdigit()
+        ]
+        assert len(subdir_buttons) == 8
