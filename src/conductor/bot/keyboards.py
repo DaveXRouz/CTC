@@ -405,6 +405,34 @@ def new_session_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def directory_picker(
+    directories: list[tuple[int, str]],
+) -> InlineKeyboardMarkup:
+    """Inline keyboard with recent dirs, custom path option, and back.
+
+    Args:
+        directories: List of ``(index, display_label)`` tuples.
+
+    Returns:
+        InlineKeyboardMarkup with one button per directory, Custom path, and Back.
+    """
+    buttons = [
+        [InlineKeyboardButton(text=f"\U0001f4c1 {label}", callback_data=f"dir:{idx}")]
+        for idx, label in directories
+    ]
+    buttons.append(
+        [
+            InlineKeyboardButton(
+                text="\U0001f4dd Custom path...", callback_data="dir:custom"
+            )
+        ]
+    )
+    buttons.append(
+        [InlineKeyboardButton(text="\u25c0\ufe0f Back", callback_data="menu:new")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def auto_responder_keyboard() -> InlineKeyboardMarkup:
     """Build auto-responder control panel.
 

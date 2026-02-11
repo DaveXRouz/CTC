@@ -22,6 +22,7 @@ from conductor.bot.keyboards import (
     action_list_keyboard,
     action_session_picker,
     new_session_keyboard,
+    directory_picker,
     auto_responder_keyboard,
     back_keyboard,
     confirm_keyboard,
@@ -362,6 +363,67 @@ def _clear_pending_input():
     set_app_data("pending_input_type", None)
     set_app_data("pending_input_session", None)
     set_app_data("pending_new_session_type", None)
+    set_app_data("pending_dir_choices", None)
+
+
+def _dir_display_label(path: str) -> str:
+    """Return a short display label for a directory path.
+
+    Uses config alias name if matched, otherwise the last path component.
+    """
+    from conductor.config import get_config
+
+    cfg = get_config()
+    # Check if path matches a configured alias
+    import os
+
+    normalized = os.path.expanduser(path)
+    for alias_name, alias_path in cfg.aliases.items():
+        if os.path.expanduser(alias_path) == normalized:
+            return alias_name
+    # Fall back to last path component
+    return os.path.basename(normalized) or path
+
+
+async def _build_directory_choices() -> list[tuple[int, str, str]]:
+    """Build deduplicated directory choices from DB + config.
+
+    Returns list of (index, display_label, full_path) tuples, capped at 5.
+    """
+    import os
+
+    from conductor.config import get_config
+    from conductor.db.queries import get_recent_working_dirs
+
+    cfg = get_config()
+    seen: set[str] = set()
+    choices: list[tuple[str, str]] = []  # (full_path, label)
+
+    # Recent dirs from DB (most recent first)
+    recent = await get_recent_working_dirs(limit=5)
+    for path in recent:
+        normalized = os.path.expanduser(path)
+        if normalized not in seen:
+            seen.add(normalized)
+            choices.append((path, _dir_display_label(path)))
+
+    # Config default_dir as fallback
+    default = cfg.default_dir
+    if default:
+        normalized = os.path.expanduser(default)
+        if normalized not in seen:
+            seen.add(normalized)
+            choices.append((default, _dir_display_label(default)))
+
+    # Config aliases
+    for alias_name, alias_path in cfg.aliases.items():
+        normalized = os.path.expanduser(alias_path)
+        if normalized not in seen:
+            seen.add(normalized)
+            choices.append((alias_path, alias_name))
+
+    # Cap at 5 and assign indices
+    return [(i, label, path) for i, (path, label) in enumerate(choices[:5])]
 
 
 @router.callback_query(F.data.startswith("menu:"))
@@ -634,26 +696,123 @@ async def handle_action_session_pick(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("new:"))
 async def handle_new_session(callback: CallbackQuery) -> None:
-    """Start the new session creation flow."""
-    session_type = callback.data.split(":", 1)[1]
+    """Start the new session creation flow with a directory picker."""
+    session_type_code = callback.data.split(":", 1)[1]
     from conductor.bot.bot import set_app_data
 
-    set_app_data("pending_input_type", "new_session")
-    set_app_data(
-        "pending_new_session_type", "claude-code" if session_type == "cc" else "shell"
-    )
+    session_type = "claude-code" if session_type_code == "cc" else "shell"
+    set_app_data("pending_new_session_type", session_type)
 
-    type_label = "Claude Code" if session_type == "cc" else "Shell"
+    type_label = "Claude Code" if session_type_code == "cc" else "Shell"
+
+    # Build directory choices
+    choices = await _build_directory_choices()
+
+    if choices:
+        # Store full paths indexed by position for the dir: callback
+        path_map = {i: path for i, _label, path in choices}
+        set_app_data("pending_dir_choices", path_map)
+
+        picker_dirs = [(i, label) for i, label, _path in choices]
+        try:
+            await callback.message.edit_text(
+                f"➕ <b>New {type_label} Session</b>\n\n" "Pick a working directory:",
+                parse_mode="HTML",
+                reply_markup=directory_picker(picker_dirs),
+            )
+        except TelegramBadRequest:
+            pass
+    else:
+        # No dirs available — fall back to text input
+        set_app_data("pending_input_type", "new_session")
+        try:
+            await callback.message.edit_text(
+                f"➕ <b>New {type_label} Session</b>\n\n"
+                "Type the working directory path below:\n"
+                "<code>~/projects/myapp</code>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard("menu:new"),
+            )
+        except TelegramBadRequest:
+            pass
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("dir:"))
+async def handle_directory_pick(callback: CallbackQuery) -> None:
+    """Handle directory picker button taps."""
+    choice = callback.data.split(":", 1)[1]
+    from conductor.bot.bot import get_app_data, set_app_data
+
+    app_data = get_app_data()
+    session_type = app_data.get("pending_new_session_type", "claude-code")
+
+    if choice == "custom":
+        # Fall back to text input
+        set_app_data("pending_input_type", "new_session")
+        set_app_data("pending_dir_choices", None)
+        type_label = "Claude Code" if session_type == "claude-code" else "Shell"
+        try:
+            await callback.message.edit_text(
+                f"➕ <b>New {type_label} Session</b>\n\n"
+                "Type the working directory path below:\n"
+                "<code>~/projects/myapp</code>",
+                parse_mode="HTML",
+                reply_markup=back_keyboard("menu:new"),
+            )
+        except TelegramBadRequest:
+            pass
+        await callback.answer()
+        return
+
+    # Numeric index — look up path
+    path_map = app_data.get("pending_dir_choices", {})
     try:
-        await callback.message.edit_text(
-            f"➕ <b>New {type_label} Session</b>\n\n"
-            "Type the working directory path below:\n"
-            "<code>~/projects/myapp</code>",
-            parse_mode="HTML",
-            reply_markup=back_keyboard("menu:new"),
+        idx = int(choice)
+        working_dir = path_map[idx]
+    except (ValueError, KeyError):
+        try:
+            await callback.message.edit_text(
+                "⏰ Directory picker expired. Please start again.",
+                reply_markup=back_keyboard("menu:new"),
+            )
+        except TelegramBadRequest:
+            pass
+        await callback.answer()
+        return
+
+    # Clear state
+    set_app_data("pending_dir_choices", None)
+    set_app_data("pending_new_session_type", None)
+
+    mgr = _get_mgr()
+    if not mgr:
+        await callback.answer("Session manager unavailable")
+        return
+
+    try:
+        session = await mgr.create_session(
+            session_type=session_type, working_dir=working_dir
         )
-    except TelegramBadRequest:
-        pass
+        # Start monitor
+        from conductor.bot.handlers.natural import _start_monitor_for_session
+
+        _start_monitor_for_session(session, mgr, app_data)
+
+        from conductor.bot.formatter import session_label
+
+        await callback.message.edit_text(
+            f"✅ Created {session_label(session)} (#{session.number})\n"
+            f"Type: {session.type}\n"
+            f"Dir: {mono(session.working_dir)}",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        try:
+            await callback.message.edit_text(f"❌ Failed to create session: {e}")
+        except TelegramBadRequest:
+            pass
 
     await callback.answer()
 

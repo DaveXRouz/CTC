@@ -197,7 +197,7 @@ async def _handle_pending_input(
 ) -> None:
     """Handle text input collected after a button tap (input/rename/new_session)."""
     from conductor.bot.bot import set_app_data
-    from conductor.bot.formatter import session_label
+    from conductor.bot.formatter import session_label, mono
     from conductor.bot.keyboards import main_menu_keyboard
 
     # Clear pending state
@@ -263,7 +263,7 @@ async def _handle_pending_input(
             await message.answer(
                 f"✅ Created {session_label(session)} (#{session.number})\n"
                 f"Type: {session.type}\n"
-                f"Dir: <code>{session.working_dir}</code>",
+                f"Dir: {mono(session.working_dir)}",
                 parse_mode="HTML",
                 reply_markup=main_menu_keyboard(),
             )

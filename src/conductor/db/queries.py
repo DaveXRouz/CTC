@@ -127,6 +127,22 @@ async def get_next_session_number() -> int:
         return row["next_num"] if row else 1
 
 
+async def get_recent_working_dirs(limit: int = 5) -> list[str]:
+    """Get distinct working directories from recent sessions, most recent first."""
+    db = await get_db()
+    sql = """
+        SELECT working_dir, MAX(created_at) AS latest
+        FROM sessions
+        WHERE working_dir IS NOT NULL AND working_dir != ''
+        GROUP BY working_dir
+        ORDER BY latest DESC
+        LIMIT ?
+    """
+    async with db.execute(sql, (limit,)) as cur:
+        rows = await cur.fetchall()
+        return [row["working_dir"] for row in rows]
+
+
 def _row_to_session(row) -> Session:
     """Convert a SQLite Row to a Session dataclass."""
     return Session(

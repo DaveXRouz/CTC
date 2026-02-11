@@ -18,6 +18,7 @@ from conductor.bot.keyboards import (
     action_list_keyboard,
     action_session_picker,
     new_session_keyboard,
+    directory_picker,
     auto_responder_keyboard,
     back_keyboard,
 )
@@ -340,3 +341,50 @@ class TestBackKeyboard:
     def test_button_text(self):
         kb = back_keyboard()
         assert "Back" in kb.inline_keyboard[0][0].text
+
+
+class TestDirectoryPicker:
+    def test_button_count_with_dirs(self):
+        dirs = [(0, "myapp"), (1, "api"), (2, "frontend")]
+        kb = directory_picker(dirs)
+        rows = kb.inline_keyboard
+        # 3 dir buttons + Custom + Back = 5
+        assert len(rows) == 5
+
+    def test_callback_data_format(self):
+        dirs = [(0, "myapp"), (1, "api")]
+        kb = directory_picker(dirs)
+        rows = kb.inline_keyboard
+        assert rows[0][0].callback_data == "dir:0"
+        assert rows[1][0].callback_data == "dir:1"
+
+    def test_labels_contain_dir_names(self):
+        dirs = [(0, "myapp"), (1, "api")]
+        kb = directory_picker(dirs)
+        rows = kb.inline_keyboard
+        assert "myapp" in rows[0][0].text
+        assert "api" in rows[1][0].text
+
+    def test_custom_path_button(self):
+        dirs = [(0, "myapp")]
+        kb = directory_picker(dirs)
+        rows = kb.inline_keyboard
+        custom_row = rows[-2]  # Second to last row
+        assert custom_row[0].callback_data == "dir:custom"
+        assert "Custom" in custom_row[0].text
+
+    def test_back_button(self):
+        dirs = [(0, "myapp")]
+        kb = directory_picker(dirs)
+        rows = kb.inline_keyboard
+        last_row = rows[-1]
+        assert last_row[0].callback_data == "menu:new"
+        assert "Back" in last_row[0].text
+
+    def test_empty_dirs(self):
+        kb = directory_picker([])
+        rows = kb.inline_keyboard
+        # Only Custom + Back = 2
+        assert len(rows) == 2
+        assert rows[0][0].callback_data == "dir:custom"
+        assert rows[1][0].callback_data == "menu:new"

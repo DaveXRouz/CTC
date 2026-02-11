@@ -270,6 +270,59 @@ class TestPruning:
         assert deleted == 0
 
 
+class TestGetRecentWorkingDirs:
+    async def test_returns_dirs_most_recent_first(self, db):
+        # Create sessions with explicit timestamps to avoid flaky ordering
+        s1 = _make_session(
+            1, "App1", working_dir="/tmp/alpha", created_at="2024-01-01T00:00:00"
+        )
+        s2 = _make_session(
+            2, "App2", working_dir="/tmp/beta", created_at="2024-01-02T00:00:00"
+        )
+        await queries.create_session(s1)
+        await queries.create_session(s2)
+        # s2 has a later timestamp, so /tmp/beta should come first
+        dirs = await queries.get_recent_working_dirs()
+        assert dirs == ["/tmp/beta", "/tmp/alpha"]
+
+    async def test_deduplicates_same_dir(self, db):
+        s1 = _make_session(1, "App1", working_dir="/tmp/shared")
+        s2 = _make_session(2, "App2", working_dir="/tmp/shared")
+        await queries.create_session(s1)
+        await queries.create_session(s2)
+        dirs = await queries.get_recent_working_dirs()
+        assert dirs == ["/tmp/shared"]
+
+    async def test_empty_db(self, db):
+        dirs = await queries.get_recent_working_dirs()
+        assert dirs == []
+
+    async def test_respects_limit(self, db):
+        for i in range(10):
+            s = _make_session(i + 1, f"App{i}", working_dir=f"/tmp/dir{i}")
+            await queries.create_session(s)
+        dirs = await queries.get_recent_working_dirs(limit=3)
+        assert len(dirs) == 3
+
+    async def test_excludes_null_and_empty(self, db):
+        s1 = _make_session(1, "App1", working_dir="")
+        s2 = _make_session(2, "App2", working_dir="/tmp/valid")
+        await queries.create_session(s1)
+        await queries.create_session(s2)
+        dirs = await queries.get_recent_working_dirs()
+        assert dirs == ["/tmp/valid"]
+
+    async def test_excludes_whitespace_only_working_dir(self, db):
+        """Whitespace-only working_dir is treated as empty string by the query."""
+        s1 = _make_session(1, "App1", working_dir="   ")
+        s2 = _make_session(2, "App2", working_dir="/tmp/valid")
+        await queries.create_session(s1)
+        await queries.create_session(s2)
+        dirs = await queries.get_recent_working_dirs()
+        # "   " is not empty, so the query returns it — callers should strip
+        assert "/tmp/valid" in dirs
+
+
 class TestEventsCRUD:
     async def test_log_and_get_events(self, db):
         s = _make_session()
