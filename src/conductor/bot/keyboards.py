@@ -9,18 +9,20 @@ from aiogram.types import (
     KeyboardButton,
 )
 
+from conductor.db.models import Session
+
 
 def main_menu_keyboard() -> ReplyKeyboardMarkup:
     """Build persistent reply keyboard for quick phone access.
 
     Returns:
-        ReplyKeyboardMarkup with Status, New Session, Output, Tokens, Help buttons.
+        ReplyKeyboardMarkup with Menu, Status, New Session, Output, Tokens, Help buttons.
     """
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Status"), KeyboardButton(text="New Session")],
-            [KeyboardButton(text="Output"), KeyboardButton(text="Tokens")],
-            [KeyboardButton(text="Help")],
+            [KeyboardButton(text="Menu"), KeyboardButton(text="Status")],
+            [KeyboardButton(text="New Session"), KeyboardButton(text="Output")],
+            [KeyboardButton(text="Tokens"), KeyboardButton(text="Help")],
         ],
         resize_keyboard=True,
         is_persistent=True,
@@ -156,14 +158,21 @@ def undo_keyboard(action_id: str) -> InlineKeyboardMarkup:
 
 
 def status_keyboard() -> InlineKeyboardMarkup:
-    """Build inline keyboard with a refresh button for the status dashboard.
+    """Build inline keyboard for the status dashboard.
 
     Returns:
-        InlineKeyboardMarkup with a single Refresh button.
+        InlineKeyboardMarkup with Refresh, Sessions, Actions, and New Session buttons.
     """
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🔄 Refresh", callback_data="status:refresh")],
+            [
+                InlineKeyboardButton(text="🔄 Refresh", callback_data="status:refresh"),
+                InlineKeyboardButton(text="📋 Sessions", callback_data="menu:sessions"),
+            ],
+            [
+                InlineKeyboardButton(text="⚡ Actions", callback_data="menu:actions"),
+                InlineKeyboardButton(text="➕ New Session", callback_data="menu:new"),
+            ],
         ]
     )
 
@@ -212,3 +221,223 @@ def suggestion_keyboard(
             ]
         )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+# ── Interactive menu keyboards ──
+
+
+def main_action_menu() -> InlineKeyboardMarkup:
+    """Build the main action menu hub.
+
+    Returns:
+        InlineKeyboardMarkup with navigation buttons for all major features.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📊 Status", callback_data="menu:status"),
+                InlineKeyboardButton(text="📋 Sessions", callback_data="menu:sessions"),
+            ],
+            [
+                InlineKeyboardButton(text="⚡ Actions", callback_data="menu:actions"),
+                InlineKeyboardButton(text="➕ New Session", callback_data="menu:new"),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🤖 Auto-Responder", callback_data="menu:auto"
+                ),
+                InlineKeyboardButton(text="📈 Tokens", callback_data="menu:tokens"),
+            ],
+            [
+                InlineKeyboardButton(text="⚙️ Settings", callback_data="menu:settings"),
+            ],
+        ]
+    )
+
+
+def session_list_keyboard(sessions: list[Session]) -> InlineKeyboardMarkup:
+    """Build session list with status icons for the session-centric flow.
+
+    Args:
+        sessions: List of active Session objects.
+
+    Returns:
+        InlineKeyboardMarkup with one button per session plus New Session and Back.
+    """
+    _status_icons = {
+        "running": "🟢",
+        "paused": "⏸",
+        "waiting": "❓",
+        "error": "🔴",
+        "exited": "⚪",
+        "rate_limited": "🟡",
+    }
+    buttons = []
+    for s in sessions:
+        icon = _status_icons.get(s.status, "⚪")
+        label = f"{s.color_emoji} #{s.number} {s.alias} {icon}"
+        buttons.append(
+            [InlineKeyboardButton(text=label, callback_data=f"sess:detail:{s.id}")]
+        )
+    buttons.append(
+        [
+            InlineKeyboardButton(text="➕ New Session", callback_data="menu:new"),
+            InlineKeyboardButton(text="◀️ Back", callback_data="menu:main"),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def session_action_keyboard(session: Session) -> InlineKeyboardMarkup:
+    """Build context-aware action buttons for a single session.
+
+    Args:
+        session: The target Session object. Pause/Resume toggles based on status.
+
+    Returns:
+        InlineKeyboardMarkup with action buttons appropriate to the session state.
+    """
+    sid = session.id
+    toggle_btn = (
+        InlineKeyboardButton(text="▶️ Resume", callback_data=f"sess:resume:{sid}")
+        if session.status == "paused"
+        else InlineKeyboardButton(text="⏸ Pause", callback_data=f"sess:pause:{sid}")
+    )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📊 Output", callback_data=f"sess:output:{sid}"
+                ),
+                InlineKeyboardButton(
+                    text="📤 Send Input", callback_data=f"sess:input:{sid}"
+                ),
+            ],
+            [
+                toggle_btn,
+                InlineKeyboardButton(
+                    text="📋 Full Log", callback_data=f"sess:log:{sid}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔄 Restart", callback_data=f"sess:restart:{sid}"
+                ),
+                InlineKeyboardButton(text="🗑️ Kill", callback_data=f"sess:kill:{sid}"),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✏️ Rename", callback_data=f"sess:rename:{sid}"
+                ),
+                InlineKeyboardButton(text="◀️ Back", callback_data="menu:sessions"),
+            ],
+        ]
+    )
+
+
+def action_list_keyboard() -> InlineKeyboardMarkup:
+    """Build the action-centric menu listing all possible actions.
+
+    Returns:
+        InlineKeyboardMarkup with one button per action plus Back.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📊 View Output", callback_data="act:output"),
+                InlineKeyboardButton(text="📤 Send Input", callback_data="act:input"),
+            ],
+            [
+                InlineKeyboardButton(text="⏸ Pause", callback_data="act:pause"),
+                InlineKeyboardButton(text="▶️ Resume", callback_data="act:resume"),
+            ],
+            [
+                InlineKeyboardButton(text="🔄 Restart", callback_data="act:restart"),
+                InlineKeyboardButton(text="🗑️ Kill", callback_data="act:kill"),
+            ],
+            [
+                InlineKeyboardButton(text="📋 Full Log", callback_data="act:log"),
+                InlineKeyboardButton(text="✏️ Rename", callback_data="act:rename"),
+            ],
+            [
+                InlineKeyboardButton(text="◀️ Back", callback_data="menu:main"),
+            ],
+        ]
+    )
+
+
+def action_session_picker(sessions: list[Session], action: str) -> InlineKeyboardMarkup:
+    """Build session picker for the action-centric flow.
+
+    Args:
+        sessions: List of active Session objects.
+        action: Action name to embed in callback data.
+
+    Returns:
+        InlineKeyboardMarkup with one button per session plus Back.
+    """
+    buttons = []
+    for s in sessions:
+        label = f"{s.color_emoji} #{s.number} {s.alias}"
+        buttons.append(
+            [InlineKeyboardButton(text=label, callback_data=f"apick:{action}:{s.id}")]
+        )
+    buttons.append([InlineKeyboardButton(text="◀️ Back", callback_data="menu:actions")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def new_session_keyboard() -> InlineKeyboardMarkup:
+    """Build session type picker for creating a new session.
+
+    Returns:
+        InlineKeyboardMarkup with Claude Code and Shell options plus Back.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🤖 Claude Code", callback_data="new:cc"),
+                InlineKeyboardButton(text="🖥️ Shell", callback_data="new:sh"),
+            ],
+            [
+                InlineKeyboardButton(text="◀️ Back", callback_data="menu:main"),
+            ],
+        ]
+    )
+
+
+def auto_responder_keyboard() -> InlineKeyboardMarkup:
+    """Build auto-responder control panel.
+
+    Returns:
+        InlineKeyboardMarkup with List Rules, Pause All, Resume All, and Back.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="📋 List Rules", callback_data="auto:list"),
+            ],
+            [
+                InlineKeyboardButton(text="⏸ Pause All", callback_data="auto:pause"),
+                InlineKeyboardButton(text="▶️ Resume All", callback_data="auto:resume"),
+            ],
+            [
+                InlineKeyboardButton(text="◀️ Back", callback_data="menu:main"),
+            ],
+        ]
+    )
+
+
+def back_keyboard(target: str = "menu:main") -> InlineKeyboardMarkup:
+    """Build a simple Back button keyboard.
+
+    Args:
+        target: Callback data for the Back button destination.
+
+    Returns:
+        InlineKeyboardMarkup with a single Back button.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Back", callback_data=target)],
+        ]
+    )

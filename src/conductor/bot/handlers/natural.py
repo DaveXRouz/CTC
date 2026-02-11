@@ -15,6 +15,7 @@ router = Router()
 
 # Menu button text → command mapping
 _MENU_ROUTES = {
+    "menu": "menu",
     "status": "status",
     "new session": "new_session",
     "output": "output",
@@ -25,7 +26,11 @@ _MENU_ROUTES = {
 
 async def _dispatch_menu_command(message: Message, route: str) -> None:
     """Dispatch a menu button tap to the appropriate command handler."""
-    if route == "status":
+    if route == "menu":
+        from conductor.bot.handlers.commands import cmd_menu
+
+        await cmd_menu(message)
+    elif route == "status":
         from conductor.bot.handlers.commands import cmd_status
 
         await cmd_status(message)
@@ -60,11 +65,13 @@ async def handle_natural_language(message: Message) -> None:
     """Handle non-command messages via NLP parsing.
 
     Processing order:
-    0. Menu button taps (Status, Output, etc.)
-    1. Quick prompt responses (short text -> last active session)
-    2. AI NLP parsing via brain.parse_nlp()
-    3. Single-session fallback (send text to the only active session)
-    4. Fallback error message
+    0. Pending input from button flow (input/rename/new_session)
+    1. Menu button taps (Status, Output, etc.)
+    2. Picked session (inline keyboard one-shot)
+    3. Quick prompt responses (short text -> last active session)
+    4. AI NLP parsing via brain.parse_nlp()
+    5. Single-session fallback (send text to the only active session)
+    6. Fallback error message
 
     Args:
         message: Incoming Telegram message.
@@ -73,18 +80,28 @@ async def handle_natural_language(message: Message) -> None:
     if not text or text.startswith("/"):
         return
 
-    # Menu button routing — check before anything else
-    route = _MENU_ROUTES.get(text.lower())
-    if route:
-        await _dispatch_menu_command(message, route)
-        return
-
-    from conductor.bot.bot import get_app_data
+    from conductor.bot.bot import get_app_data, set_app_data
     from conductor.bot.handlers.commands import _session_manager
 
     app_data = get_app_data()
     brain = app_data.get("brain")
     mgr = _session_manager
+
+    # Pending input from button flow (input/rename/new_session) — check first
+    # so that typing "Status" as a rename value doesn't trigger menu dispatch.
+    pending_type = app_data.get("pending_input_type")
+    if pending_type:
+        if not mgr:
+            await message.answer("⏳ Bot is still initializing. Try again shortly.")
+            return
+        await _handle_pending_input(message, text, pending_type, app_data, mgr)
+        return
+
+    # Menu button routing
+    route = _MENU_ROUTES.get(text.lower())
+    if route:
+        await _dispatch_menu_command(message, route)
+        return
 
     if not mgr:
         await message.answer("⏳ Bot is still initializing. Try again shortly.")
@@ -93,8 +110,6 @@ async def handle_natural_language(message: Message) -> None:
     # Check if a session was picked via inline keyboard (one-time use)
     picked_session = app_data.get("picked_session")
     if picked_session:
-        from conductor.bot.bot import set_app_data
-
         set_app_data("picked_session", None)
         session = mgr.get_session(picked_session)
         if session:
@@ -175,6 +190,103 @@ async def handle_natural_language(message: Message) -> None:
     from conductor.bot.handlers.fallback import send_fallback
 
     await send_fallback(message)
+
+
+async def _handle_pending_input(
+    message: Message, text: str, pending_type: str, app_data: dict, mgr
+) -> None:
+    """Handle text input collected after a button tap (input/rename/new_session)."""
+    from conductor.bot.bot import set_app_data
+    from conductor.bot.formatter import session_label
+    from conductor.bot.keyboards import main_menu_keyboard
+
+    # Clear pending state
+    set_app_data("pending_input_type", None)
+    session_id = app_data.get("pending_input_session")
+
+    if pending_type == "input":
+        if not session_id:
+            await message.answer("⚠️ No session selected.")
+            return
+        session = mgr.get_session(session_id)
+        if not session:
+            await message.answer("❌ Session no longer exists.")
+            return
+        # Safety: check destructive keywords
+        from conductor.sessions.detector import has_destructive_keyword
+
+        if has_destructive_keyword(text):
+            await message.answer(
+                "⚠️ Blocked: destructive keyword detected. "
+                "Use /input to send explicitly."
+            )
+            return
+        if mgr.send_input(session.id, text):
+            await message.answer(
+                f"📤 Sent to {session_label(session)}: <code>{text}</code>",
+                parse_mode="HTML",
+                reply_markup=main_menu_keyboard(),
+            )
+        else:
+            await message.answer("⚠️ Failed to send — session pane not found")
+
+    elif pending_type == "rename":
+        if not session_id:
+            await message.answer("⚠️ No session selected.")
+            return
+        session = mgr.get_session(session_id)
+        if not session:
+            await message.answer("❌ Session no longer exists.")
+            return
+        old_name = session.alias
+        try:
+            result = await mgr.rename_session(session.id, text)
+            if result:
+                await message.answer(
+                    f"✏️ Renamed {session.color_emoji} #{session.number}: "
+                    f"{old_name} → <b>{text}</b>",
+                    parse_mode="HTML",
+                    reply_markup=main_menu_keyboard(),
+                )
+        except ValueError as e:
+            await message.answer(f"❌ {e}")
+
+    elif pending_type == "new_session":
+        session_type = app_data.get("pending_new_session_type", "claude-code")
+        set_app_data("pending_new_session_type", None)
+        try:
+            session = await mgr.create_session(
+                session_type=session_type, working_dir=text
+            )
+            # Start monitor for the new session
+            _start_monitor_for_session(session, mgr, app_data)
+            await message.answer(
+                f"✅ Created {session_label(session)} (#{session.number})\n"
+                f"Type: {session.type}\n"
+                f"Dir: <code>{session.working_dir}</code>",
+                parse_mode="HTML",
+                reply_markup=main_menu_keyboard(),
+            )
+        except Exception as e:
+            await message.answer(f"❌ Failed to create session: {e}")
+
+    set_app_data("pending_input_session", None)
+
+
+def _start_monitor_for_session(session, mgr, app_data: dict) -> None:
+    """Start an OutputMonitor for a newly created session (from button flow)."""
+    import asyncio
+    from conductor.sessions.monitor import OutputMonitor
+
+    monitors = app_data.get("monitors", {})
+    monitor_tasks = app_data.get("monitor_tasks", {})
+    on_monitor_event = app_data.get("on_monitor_event")
+
+    pane = mgr.get_pane(session.id)
+    if pane and on_monitor_event:
+        monitor = OutputMonitor(pane, session, on_event=on_monitor_event)
+        monitors[session.id] = monitor
+        monitor_tasks[session.id] = asyncio.create_task(monitor.start())
 
 
 async def _dispatch_nlp_command(message: Message, result: dict, mgr) -> None:

@@ -40,6 +40,7 @@ async def _setup_bot_profile(bot) -> None:
     from aiogram.types import BotCommand
 
     commands = [
+        BotCommand(command="menu", description="Open action menu"),
         BotCommand(command="status", description="Session dashboard"),
         BotCommand(command="new", description="Create session (cc|sh <dir>)"),
         BotCommand(command="output", description="AI summary of output"),
@@ -331,6 +332,9 @@ async def run() -> None:
                         message=f"{usage['percentage']}%",
                     )
                 )
+
+    # Store on_monitor_event so button-created sessions can start monitors
+    set_app_data("on_monitor_event", on_monitor_event)
 
     # Start monitors for existing sessions
     for session in await session_manager.list_sessions():

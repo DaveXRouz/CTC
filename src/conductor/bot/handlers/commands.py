@@ -19,6 +19,7 @@ from conductor.bot.keyboards import (
     status_keyboard,
     confirm_keyboard,
     main_menu_keyboard,
+    main_action_menu,
 )
 from conductor.security.redactor import redact_sensitive
 from conductor.sessions.manager import SessionManager
@@ -76,6 +77,8 @@ async def cmd_start(message: Message) -> None:
 async def cmd_help(message: Message) -> None:
     await message.answer(
         "📖 <b>Command Reference</b>\n\n"
+        "<b>Navigation</b>\n"
+        "/menu — interactive button menu\n\n"
         "<b>Sessions</b>\n"
         "/new cc|sh &lt;dir&gt; — create session\n"
         "/kill /restart /pause /resume &lt;name|#&gt;\n"
@@ -93,9 +96,22 @@ async def cmd_help(message: Message) -> None:
         "/auto list | add | remove | pause | resume\n\n"
         "<b>Settings</b>\n"
         "/quiet HH:MM-HH:MM — quiet hours\n"
-        "/settings — view config",
+        "/settings — view config\n\n"
+        "💡 Tap <b>Menu</b> for a button-driven interface.",
         parse_mode="HTML",
         reply_markup=main_menu_keyboard(),
+    )
+
+
+# ── /menu ──
+
+
+@router.message(Command("menu"))
+async def cmd_menu(message: Message) -> None:
+    await message.answer(
+        "🎛️ <b>Conductor Menu</b>",
+        parse_mode="HTML",
+        reply_markup=main_action_menu(),
     )
 
 

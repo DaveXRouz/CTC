@@ -12,7 +12,16 @@ from conductor.bot.keyboards import (
     status_keyboard,
     session_picker,
     suggestion_keyboard,
+    main_action_menu,
+    session_list_keyboard,
+    session_action_keyboard,
+    action_list_keyboard,
+    action_session_picker,
+    new_session_keyboard,
+    auto_responder_keyboard,
+    back_keyboard,
 )
+from conductor.db.models import Session
 
 
 class TestMainMenuKeyboard:
@@ -29,9 +38,9 @@ class TestMainMenuKeyboard:
         kb = main_menu_keyboard()
         rows = kb.keyboard
         assert len(rows) == 3
-        assert [b.text for b in rows[0]] == ["Status", "New Session"]
-        assert [b.text for b in rows[1]] == ["Output", "Tokens"]
-        assert [b.text for b in rows[2]] == ["Help"]
+        assert [b.text for b in rows[0]] == ["Menu", "Status"]
+        assert [b.text for b in rows[1]] == ["New Session", "Output"]
+        assert [b.text for b in rows[2]] == ["Tokens", "Help"]
 
 
 class TestKeyboards:
@@ -75,8 +84,11 @@ class TestKeyboards:
     def test_status_keyboard(self):
         kb = status_keyboard()
         buttons = kb.inline_keyboard
-        assert len(buttons) == 1
+        assert len(buttons) == 2
         assert "status:refresh" in buttons[0][0].callback_data
+        assert "menu:sessions" in buttons[0][1].callback_data
+        assert "menu:actions" in buttons[1][0].callback_data
+        assert "menu:new" in buttons[1][1].callback_data
 
     def test_session_picker(self):
         sessions = [
@@ -116,3 +128,215 @@ class TestKeyboards:
         suggestions = [{"command": "test"}]
         kb = suggestion_keyboard(suggestions, "s1")
         assert kb.inline_keyboard[0][0].text == "💡 Option 1"
+
+
+def _make_session(
+    id: str = "sess-1",
+    number: int = 1,
+    alias: str = "test-app",
+    status: str = "running",
+    color_emoji: str = "🔵",
+) -> Session:
+    return Session(
+        id=id,
+        number=number,
+        alias=alias,
+        type="claude-code",
+        working_dir="/tmp",
+        tmux_session="conductor-1",
+        status=status,
+        color_emoji=color_emoji,
+    )
+
+
+class TestMainActionMenu:
+    def test_layout_4_rows(self):
+        kb = main_action_menu()
+        rows = kb.inline_keyboard
+        assert len(rows) == 4
+
+    def test_callback_data_prefixes(self):
+        kb = main_action_menu()
+        rows = kb.inline_keyboard
+        # Row 0: Status, Sessions
+        assert rows[0][0].callback_data == "menu:status"
+        assert rows[0][1].callback_data == "menu:sessions"
+        # Row 1: Actions, New Session
+        assert rows[1][0].callback_data == "menu:actions"
+        assert rows[1][1].callback_data == "menu:new"
+        # Row 2: Auto-Responder, Tokens
+        assert rows[2][0].callback_data == "menu:auto"
+        assert rows[2][1].callback_data == "menu:tokens"
+        # Row 3: Settings
+        assert rows[3][0].callback_data == "menu:settings"
+
+
+class TestSessionListKeyboard:
+    def test_with_sessions(self):
+        sessions = [_make_session("s1", 1, "app1"), _make_session("s2", 2, "app2")]
+        kb = session_list_keyboard(sessions)
+        rows = kb.inline_keyboard
+        # 2 session rows + 1 footer row
+        assert len(rows) == 3
+        assert rows[0][0].callback_data == "sess:detail:s1"
+        assert rows[1][0].callback_data == "sess:detail:s2"
+        # Footer has New Session + Back
+        assert rows[2][0].callback_data == "menu:new"
+        assert rows[2][1].callback_data == "menu:main"
+
+    def test_empty_list(self):
+        kb = session_list_keyboard([])
+        rows = kb.inline_keyboard
+        # Only footer row
+        assert len(rows) == 1
+        assert rows[0][0].callback_data == "menu:new"
+
+    def test_status_icons_in_label(self):
+        session = _make_session(status="paused")
+        kb = session_list_keyboard([session])
+        label = kb.inline_keyboard[0][0].text
+        assert "⏸" in label
+
+    def test_running_status_icon(self):
+        session = _make_session(status="running")
+        kb = session_list_keyboard([session])
+        label = kb.inline_keyboard[0][0].text
+        assert "🟢" in label
+
+
+class TestSessionActionKeyboard:
+    def test_pause_button_when_running(self):
+        session = _make_session(status="running")
+        kb = session_action_keyboard(session)
+        rows = kb.inline_keyboard
+        # Row 1 has the toggle button
+        toggle = rows[1][0]
+        assert "Pause" in toggle.text
+        assert toggle.callback_data == f"sess:pause:{session.id}"
+
+    def test_resume_button_when_paused(self):
+        session = _make_session(status="paused")
+        kb = session_action_keyboard(session)
+        rows = kb.inline_keyboard
+        toggle = rows[1][0]
+        assert "Resume" in toggle.text
+        assert toggle.callback_data == f"sess:resume:{session.id}"
+
+    def test_layout_4_rows(self):
+        session = _make_session()
+        kb = session_action_keyboard(session)
+        assert len(kb.inline_keyboard) == 4
+
+    def test_all_actions_present(self):
+        session = _make_session()
+        kb = session_action_keyboard(session)
+        all_data = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+        sid = session.id
+        assert f"sess:output:{sid}" in all_data
+        assert f"sess:input:{sid}" in all_data
+        assert f"sess:log:{sid}" in all_data
+        assert f"sess:restart:{sid}" in all_data
+        assert f"sess:kill:{sid}" in all_data
+        assert f"sess:rename:{sid}" in all_data
+        assert "menu:sessions" in all_data  # Back button
+
+
+class TestActionListKeyboard:
+    def test_layout_5_rows(self):
+        kb = action_list_keyboard()
+        assert len(kb.inline_keyboard) == 5
+
+    def test_all_actions(self):
+        kb = action_list_keyboard()
+        all_data = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+        for action in (
+            "output",
+            "input",
+            "pause",
+            "resume",
+            "restart",
+            "kill",
+            "log",
+            "rename",
+        ):
+            assert f"act:{action}" in all_data
+
+    def test_back_button(self):
+        kb = action_list_keyboard()
+        last_row = kb.inline_keyboard[-1]
+        assert last_row[0].callback_data == "menu:main"
+
+
+class TestActionSessionPicker:
+    def test_callback_data_format(self):
+        sessions = [_make_session("s1", 1, "app1"), _make_session("s2", 2, "app2")]
+        kb = action_session_picker(sessions, "pause")
+        rows = kb.inline_keyboard
+        assert rows[0][0].callback_data == "apick:pause:s1"
+        assert rows[1][0].callback_data == "apick:pause:s2"
+
+    def test_back_button(self):
+        kb = action_session_picker([_make_session()], "kill")
+        last_row = kb.inline_keyboard[-1]
+        assert last_row[0].callback_data == "menu:actions"
+
+    def test_empty_sessions(self):
+        kb = action_session_picker([], "output")
+        # Only back button
+        assert len(kb.inline_keyboard) == 1
+        assert kb.inline_keyboard[0][0].callback_data == "menu:actions"
+
+    def test_session_label_format(self):
+        session = _make_session(color_emoji="🟣", number=3, alias="myapp")
+        kb = action_session_picker([session], "input")
+        label = kb.inline_keyboard[0][0].text
+        assert "🟣" in label
+        assert "#3" in label
+        assert "myapp" in label
+
+
+class TestNewSessionKeyboard:
+    def test_layout(self):
+        kb = new_session_keyboard()
+        rows = kb.inline_keyboard
+        assert len(rows) == 2
+
+    def test_session_types(self):
+        kb = new_session_keyboard()
+        rows = kb.inline_keyboard
+        assert rows[0][0].callback_data == "new:cc"
+        assert rows[0][1].callback_data == "new:sh"
+
+    def test_back_button(self):
+        kb = new_session_keyboard()
+        last_row = kb.inline_keyboard[-1]
+        assert last_row[0].callback_data == "menu:main"
+
+
+class TestAutoResponderKeyboard:
+    def test_layout_3_rows(self):
+        kb = auto_responder_keyboard()
+        assert len(kb.inline_keyboard) == 3
+
+    def test_buttons(self):
+        kb = auto_responder_keyboard()
+        rows = kb.inline_keyboard
+        assert rows[0][0].callback_data == "auto:list"
+        assert rows[1][0].callback_data == "auto:pause"
+        assert rows[1][1].callback_data == "auto:resume"
+        assert rows[2][0].callback_data == "menu:main"
+
+
+class TestBackKeyboard:
+    def test_default_target(self):
+        kb = back_keyboard()
+        assert len(kb.inline_keyboard) == 1
+        assert kb.inline_keyboard[0][0].callback_data == "menu:main"
+
+    def test_custom_target(self):
+        kb = back_keyboard("sess:detail:abc-123")
+        assert kb.inline_keyboard[0][0].callback_data == "sess:detail:abc-123"
+
+    def test_button_text(self):
+        kb = back_keyboard()
+        assert "Back" in kb.inline_keyboard[0][0].text
