@@ -107,6 +107,12 @@ class SessionManager:
             alias = guess_alias_from_dir(working_dir)
 
         number = await queries.get_next_session_number()
+
+        # Avoid collision with orphaned tmux sessions not tracked in DB
+        tmux_names = {s.name for s in self.server.sessions}
+        while f"conductor-{number}" in tmux_names:
+            number += 1
+
         session_name = f"conductor-{number}"
         session_id = str(uuid.uuid4())
         color = self._next_color()
@@ -123,7 +129,7 @@ class SessionManager:
         if session_type == "claude-code":
             pane.send_keys("claude", enter=True)
 
-        pid = pane.get("pane_pid")
+        pid = pane.pane_pid
 
         session = Session(
             id=session_id,
@@ -132,7 +138,7 @@ class SessionManager:
             type=session_type,
             working_dir=working_dir,
             tmux_session=session_name,
-            tmux_pane_id=pane.get("pane_id"),
+            tmux_pane_id=pane.pane_id,
             pid=int(pid) if pid else None,
             status="running",
             color_emoji=color,

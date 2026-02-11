@@ -132,6 +132,7 @@ class TestCreateSession:
         tmux_session, pane = _make_mock_tmux_session()
         mock_server = MagicMock()
         mock_server.new_session.return_value = tmux_session
+        mock_server.sessions = []
 
         mgr = SessionManager()
         mgr._server = mock_server
@@ -178,6 +179,7 @@ class TestCreateSession:
         tmux_session, pane = _make_mock_tmux_session()
         mock_server = MagicMock()
         mock_server.new_session.return_value = tmux_session
+        mock_server.sessions = []
 
         mgr = SessionManager()
         mgr._server = mock_server
@@ -231,6 +233,7 @@ class TestCreateSession:
         tmux_session, pane = _make_mock_tmux_session()
         mock_server = MagicMock()
         mock_server.new_session.return_value = tmux_session
+        mock_server.sessions = []
 
         mgr = SessionManager()
         mgr._server = mock_server
@@ -254,12 +257,48 @@ class TestCreateSession:
         tmux_session, pane = _make_mock_tmux_session()
         mock_server = MagicMock()
         mock_server.new_session.return_value = tmux_session
+        mock_server.sessions = []
 
         mgr = SessionManager()
         mgr._server = mock_server
 
         session = await mgr.create_session(working_dir="/tmp")
         assert session.alias == "Tmp"
+
+    @pytest.mark.asyncio
+    @patch("conductor.sessions.manager.queries")
+    @patch("conductor.sessions.manager.get_config")
+    @patch("conductor.sessions.manager.uuid.uuid4", return_value="uuid-collision")
+    async def test_create_session_skips_orphaned_tmux_name(
+        self, mock_uuid, mock_get_config, mock_queries
+    ):
+        cfg = _make_mock_config()
+        mock_get_config.return_value = cfg
+
+        mock_queries.get_next_session_number = AsyncMock(return_value=1)
+        mock_queries.create_session = AsyncMock()
+
+        tmux_session, pane = _make_mock_tmux_session()
+        mock_server = MagicMock()
+        mock_server.new_session.return_value = tmux_session
+
+        # Simulate an orphaned tmux session named conductor-1
+        orphan = MagicMock()
+        orphan.name = "conductor-1"
+        mock_server.sessions = [orphan]
+
+        mgr = SessionManager()
+        mgr._server = mock_server
+
+        session = await mgr.create_session(working_dir="/tmp", alias="Skip")
+
+        assert session.number == 2
+        assert session.tmux_session == "conductor-2"
+        mock_server.new_session.assert_called_once_with(
+            session_name="conductor-2",
+            start_directory="/tmp",
+            attach=False,
+        )
 
 
 # ===========================================================================

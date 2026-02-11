@@ -60,16 +60,24 @@ async def recover_sessions(
             continue
 
         pane = tmux_session.active_window.active_pane
-        pid_str = pane.get("pane_pid")
+        pid_str = pane.pane_pid
         pid = int(pid_str) if pid_str else None
 
-        # Check if process is alive
+        # Check if process is alive — kill orphaned tmux sessions with dead PIDs
         if pid and not _is_pid_alive(pid):
-            logger.info(f"Session conductor-{number} process dead, marking as exited")
+            logger.info(
+                f"Session conductor-{number} process dead, killing orphaned tmux session"
+            )
+            try:
+                tmux_session.kill()
+            except Exception as e:
+                logger.warning(
+                    f"Failed to kill orphaned tmux session conductor-{number}: {e}"
+                )
             continue
 
         # Get working directory
-        pane_path = pane.get("pane_current_path") or "~"
+        pane_path = pane.pane_current_path or "~"
         alias = guess_alias_from_dir(pane_path)
 
         # Determine available color
@@ -87,7 +95,7 @@ async def recover_sessions(
             type="claude-code",  # Assume claude-code for recovered sessions
             working_dir=pane_path,
             tmux_session=tmux_session.name,
-            tmux_pane_id=pane.get("pane_id"),
+            tmux_pane_id=pane.pane_id,
             pid=pid,
             status="running",
             color_emoji=color,
