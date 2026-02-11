@@ -19,6 +19,32 @@ from conductor.utils.logger import get_logger
 logger = get_logger("conductor.sessions.recovery")
 
 
+async def prune_stale_sessions(session_manager: SessionManager) -> int:
+    """Mark DB sessions as 'exited' if their tmux session no longer exists."""
+    sessions = await queries.get_all_sessions(active_only=True)
+    if not sessions:
+        return 0
+
+    try:
+        server = session_manager.server
+        live_tmux_names = {s.name for s in server.sessions}
+    except Exception:
+        # tmux server not running → all sessions are stale
+        live_tmux_names = set()
+
+    pruned = 0
+    for session in sessions:
+        if session.tmux_session not in live_tmux_names:
+            await queries.update_session(session.id, status="exited")
+            logger.info(
+                f"Pruned stale session #{session.number} '{session.alias}' "
+                f"(tmux '{session.tmux_session}' not found)"
+            )
+            pruned += 1
+
+    return pruned
+
+
 async def recover_sessions(
     session_manager: SessionManager,
     monitors: dict,

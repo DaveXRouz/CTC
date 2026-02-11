@@ -12,7 +12,7 @@ from conductor.db.database import init_database, close_database
 from conductor.db.queries import seed_default_rules
 from conductor.sessions.manager import SessionManager
 from conductor.sessions.monitor import OutputMonitor
-from conductor.sessions.recovery import recover_sessions
+from conductor.sessions.recovery import recover_sessions, prune_stale_sessions
 from conductor.bot.bot import create_bot, set_app_data
 from conductor.bot.notifier import Notifier
 from conductor.bot.formatter import format_event
@@ -132,6 +132,9 @@ async def run() -> None:
 
     # Init session manager
     session_manager = SessionManager()
+    pruned_stale = await prune_stale_sessions(session_manager)
+    if pruned_stale:
+        logger.info(f"Pruned {pruned_stale} stale session(s) from database")
     await session_manager.load_from_db()
     set_session_manager(session_manager)
     set_app_data("session_manager", session_manager)
