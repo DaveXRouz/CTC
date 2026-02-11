@@ -127,7 +127,7 @@ class SessionManager:
 
         # Start Claude Code if needed
         if session_type == "claude-code":
-            pane.send_keys("claude", enter=True)
+            pane.send_keys("claude", enter=True, literal=True)
 
         pid = pane.pane_pid
 
@@ -351,12 +351,23 @@ class SessionManager:
             text: Text to send (followed by Enter).
 
         Returns:
-            ``True`` if input was sent, ``False`` if pane not found.
+            ``True`` if input was sent, ``False`` if pane not found or send failed.
         """
         pane = self._panes.get(session_id)
         if not pane:
             return False
-        pane.send_keys(text, enter=True)
+        try:
+            pane.send_keys(text, enter=True, literal=True)
+        except Exception:
+            logger.warning(
+                f"send_keys failed for session {session_id}, retrying with explicit Enter"
+            )
+            try:
+                pane.cmd("send-keys", "-l", "-t", pane.pane_id, text)
+                pane.cmd("send-keys", "-t", pane.pane_id, "Enter")
+            except Exception:
+                logger.error(f"Failed to send input to session {session_id}")
+                return False
         logger.info(f"Sent input to session {session_id} ({len(text)} chars)")
         return True
 

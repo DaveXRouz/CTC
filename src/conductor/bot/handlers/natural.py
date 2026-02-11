@@ -100,11 +100,13 @@ async def handle_natural_language(message: Message) -> None:
         if session:
             from conductor.bot.formatter import session_label
 
-            mgr.send_input(session.id, text)
-            await message.answer(
-                f"📤 Sent to {session_label(session)}: <code>{text}</code>",
-                parse_mode="HTML",
-            )
+            if mgr.send_input(session.id, text):
+                await message.answer(
+                    f"📤 Sent to {session_label(session)}: <code>{text}</code>",
+                    parse_mode="HTML",
+                )
+            else:
+                await message.answer("⚠️ Failed to send — session pane not found")
             return
 
     # Quick check: if only one session and text looks like a response (short, y/n, number)
@@ -125,11 +127,13 @@ async def handle_natural_language(message: Message) -> None:
                 return
             from conductor.bot.formatter import session_label
 
-            mgr.send_input(session.id, text)
-            await message.answer(
-                f"📤 Sent to {session_label(session)}: <code>{text}</code>",
-                parse_mode="HTML",
-            )
+            if mgr.send_input(session.id, text):
+                await message.answer(
+                    f"📤 Sent to {session_label(session)}: <code>{text}</code>",
+                    parse_mode="HTML",
+                )
+            else:
+                await message.answer("⚠️ Failed to send — session pane not found")
             return
 
     # Try AI brain NLP if available
@@ -158,11 +162,13 @@ async def handle_natural_language(message: Message) -> None:
         session = sessions[0]
         from conductor.bot.formatter import session_label
 
-        mgr.send_input(session.id, text)
-        await message.answer(
-            f"📤 Sent to {session_label(session)}: <code>{text}</code>",
-            parse_mode="HTML",
-        )
+        if mgr.send_input(session.id, text):
+            await message.answer(
+                f"📤 Sent to {session_label(session)}: <code>{text}</code>",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer("⚠️ Failed to send — session pane not found")
         return
 
     # Give up
@@ -197,11 +203,13 @@ async def _dispatch_nlp_command(message: Message, result: dict, mgr) -> None:
             if session:
                 from conductor.bot.formatter import session_label
 
-                mgr.send_input(session.id, text)
-                await message.answer(
-                    f"📤 Sent to {session_label(session)}: <code>{text}</code>",
-                    parse_mode="HTML",
-                )
+                if mgr.send_input(session.id, text):
+                    await message.answer(
+                        f"📤 Sent to {session_label(session)}: <code>{text}</code>",
+                        parse_mode="HTML",
+                    )
+                else:
+                    await message.answer("⚠️ Failed to send — session pane not found")
     elif command == "output":
         from conductor.bot.handlers.commands import cmd_output
 

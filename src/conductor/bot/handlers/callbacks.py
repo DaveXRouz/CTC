@@ -107,11 +107,19 @@ async def handle_permission(callback: CallbackQuery) -> None:
         return
 
     if decision == "yes":
-        mgr.send_input(session_id, "y")
-        await callback.message.edit_text(f"✅ Sent 'y' to {session_label(session)}")
+        if mgr.send_input(session_id, "y"):
+            await callback.message.edit_text(f"✅ Sent 'y' to {session_label(session)}")
+        else:
+            await callback.message.edit_text(
+                f"⚠️ Failed to send to {session_label(session)} — pane not found"
+            )
     elif decision == "no":
-        mgr.send_input(session_id, "n")
-        await callback.message.edit_text(f"❌ Sent 'n' to {session_label(session)}")
+        if mgr.send_input(session_id, "n"):
+            await callback.message.edit_text(f"❌ Sent 'n' to {session_label(session)}")
+        else:
+            await callback.message.edit_text(
+                f"⚠️ Failed to send to {session_label(session)} — pane not found"
+            )
     elif decision == "ctx":
         # Show last 20 lines of context
         from conductor.bot.bot import get_app_data
@@ -218,10 +226,14 @@ async def handle_completion(callback: CallbackQuery) -> None:
         return
 
     if action == "test":
-        mgr.send_input(session_id, "npm test")
-        await callback.message.edit_text(
-            f"▶️ Running tests in {session_label(session)}"
-        )
+        if mgr.send_input(session_id, "npm test"):
+            await callback.message.edit_text(
+                f"▶️ Running tests in {session_label(session)}"
+            )
+        else:
+            await callback.message.edit_text(
+                f"⚠️ Failed to send to {session_label(session)} — pane not found"
+            )
     elif action == "log":
         await callback.message.answer("📋 Use /log to view the full session log.")
     elif action == "new":
@@ -277,10 +289,14 @@ async def handle_suggestion(callback: CallbackQuery) -> None:
         suggestion = suggestions[int(idx)]
         cmd = suggestion.get("command", "")
         if cmd:
-            mgr.send_input(session_id, cmd)
             session = mgr.get_session(session_id)
             label = session_label(session) if session else session_id
-            await callback.message.edit_text(f"▶️ Running in {label}: {cmd}")
+            if mgr.send_input(session_id, cmd):
+                await callback.message.edit_text(f"▶️ Running in {label}: {cmd}")
+            else:
+                await callback.message.edit_text(
+                    f"⚠️ Failed to send to {label} — pane not found"
+                )
     except (IndexError, ValueError):
         await callback.message.edit_text("❌ Suggestion no longer available.")
 

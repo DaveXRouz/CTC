@@ -156,7 +156,7 @@ class TestCreateSession:
             start_directory="/tmp",
             attach=False,
         )
-        pane.send_keys.assert_called_once_with("claude", enter=True)
+        pane.send_keys.assert_called_once_with("claude", enter=True, literal=True)
         mock_queries.create_session.assert_awaited_once()
 
         # Session stored in manager
@@ -463,7 +463,9 @@ class TestSendInput:
         result = mgr.send_input("sid-1", "hello world")
 
         assert result is True
-        mock_pane.send_keys.assert_called_once_with("hello world", enter=True)
+        mock_pane.send_keys.assert_called_once_with(
+            "hello world", enter=True, literal=True
+        )
 
     def test_send_input_unknown_session(self):
         mgr = SessionManager()

@@ -224,7 +224,10 @@ async def run() -> None:
             # Check auto-responder first
             auto_result = await auto_responder.check_and_respond(text)
             if auto_result.should_respond:
-                session_manager.send_input(session.id, auto_result.response)
+                if not session_manager.send_input(session.id, auto_result.response):
+                    logger.warning(
+                        f"Auto-response failed: pane not found for session {session.id}"
+                    )
                 undo_id = f"{session.id}:{auto_result.rule_id}"
                 msg = format_event(
                     "🤖",
